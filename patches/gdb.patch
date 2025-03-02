@@ -1,0 +1,15 @@
+diff --git clean/bfd/config.bfd patched/bfd/config.bfd
+index 0d79011..f5835f7 100644
+--- clean/bfd/config.bfd
++++ patched/bfd/config.bfd
+@@ -665,6 +665,10 @@ case "${targ}" in
+     targ_selvecs=
+     targ64_selvecs=x86_64_elf64_vec
+     ;;
++  i[3-7]86-*-andromeda*)
++    targ_defvec=i386_elf32_vec
++    targ_selvecs=
++    ;;
+ #ifdef BFD64
+   x86_64-*-cloudabi*)
+     targ_defvec=x86_64_elf64_cloudabi_vec

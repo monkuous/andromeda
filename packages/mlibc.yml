@@ -1,0 +1,41 @@
+sources:
+  - name: frigg
+    subdir: ports
+    git: 'https://github.com/managarm/frigg.git'
+    branch: master
+    commit: 307e9361acb49e7d9e5e7f62a1b48de66974d8f4
+    rolling_version: true
+    version: '0.0pl@ROLLING_ID@'
+
+packages:
+  - name: mlibc
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: ports
+      git: 'https://github.com/managarm/mlibc.git'
+      branch: master
+      commit: bc9133822b596e00be4019ef50eb33205cf149c5
+      rolling_version: true
+      version: '0.0pl@ROLLING_ID@'
+      sources_required:
+        - frigg
+      regenerate:
+        - args: ['ln', '-sf', '../../frigg', '@THIS_SOURCE_DIR@/subprojects/frigg']
+    tools_required:
+      - bootstrap-gcc
+      - meson
+    configure:
+      - args:
+          - 'meson'
+          - 'setup'
+          - '--cross-file=@BUILD_ROOT@/tools/meson/cross.txt'
+          - '--wrap-mode=nodownload'
+          - '--prefix=/usr'
+          - '-Dbuildtype=@OPTION:build-type@'
+          - '-Db_ndebug=if-release'
+          - '-Db_lto=@OPTION:lto@'
+          - '-Db_lto_mode=thin'
+          - '@THIS_SOURCE_DIR@'
+    build:
+      - args: ['meson', 'compile', '-j@PARALLELISM@']
+      - args: ['meson', 'install', '--no-rebuild', '--destdir=@THIS_COLLECT_DIR@']

@@ -1,0 +1,26 @@
+sources:
+  - name: automake
+    subdir: ports
+    url: 'https://ftpmirror.gnu.org/automake/automake-1.17.tar.xz'
+    checksum: 'blake2b:53c24c138faf3d2be4e30ababcccd4d157c03e815fc4b7f3e3063b6648cf254dfa63afe6e3285b21309dbf260335c3e67991db3825e7532b158b25ccaead83f5'
+    format: 'tar.xz'
+    extract_path: 'automake-1.17'
+    version: '1.17'
+    tools_required:
+      - autoconf
+    regenerate:
+      - args: ['cp', '@BUILD_ROOT@/tools/autoconf/share/autoconf/build-aux/config.guess', '@THIS_SOURCE_DIR@/lib']
+      - args: ['cp', '@BUILD_ROOT@/tools/autoconf/share/autoconf/build-aux/config.sub', '@THIS_SOURCE_DIR@/lib']
+
+tools:
+  - name: automake
+    architecture: noarch
+    from_source: automake
+    tools_required:
+      - autoconf
+    configure: 
+      - args: ['@THIS_SOURCE_DIR@/configure', '--prefix=@PREFIX@']
+    compile:
+      - args: ['make', '-j@PARALLELISM@', 'MAKEINFO=true']
+    install:
+      - args: ['make', '-j@PARALLELISM@', 'MAKEINFO=true', 'install']

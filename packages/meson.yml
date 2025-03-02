@@ -1,0 +1,14 @@
+tools:
+  - name: meson
+    architecture: noarch
+    source:
+      subdir: ports
+      version: '0.0.0'
+    install:
+      - args: ['mkdir', '-p', '@PREFIX@']
+      - args:
+          - '@SOURCE_ROOT@/support/cross/meson.sh'
+          - '@PREFIX@/cross.txt'
+          - '@OPTION:cpu@'
+          - '@OPTION:triple@'
+          - '@SYSROOT_DIR@'

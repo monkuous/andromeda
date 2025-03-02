@@ -1,0 +1,44 @@
+general:
+  mandate_hashes_for_archives: true
+  enable_network_isolation: true
+
+declare_options:
+  - name: build-type
+    default: release
+  - name: cpu
+    default: i486
+  - name: lto
+    default: 'true'
+  - name: triple
+    default: pc-andromeda-mlibc
+
+tasks:
+  - name: make-image
+    pkgs_required:
+      - andromeda
+    args: ['@SOURCE_ROOT@/support/mkimg.sh', '@BUILD_ROOT@/andromeda.img', '128', '@SYSROOT_DIR@']
+  - name: qemu-kvm
+    tasks_required:
+      - make-image
+    args: "'@SOURCE_ROOT@/support/qemu/kvm.sh' '@BUILD_ROOT@/andromeda.img' $QFLAGS"
+    containerless: true
+    workdir: '@BUILD_ROOT@'
+  - name: qemu-tcg
+    tasks_required:
+      - make-image
+    args: "'@SOURCE_ROOT@/support/qemu/tcg.sh' '@BUILD_ROOT@/andromeda.img' $QFLAGS"
+    containerless: true
+    workdir: '@BUILD_ROOT@'
+
+imports:
+  - file: packages/andromeda-filesystem.yml
+  - file: packages/andromeda.yml
+  - file: packages/autoconf.yml
+  - file: packages/automake.yml
+  - file: packages/binutils.yml
+  - file: packages/gcc.yml
+  - file: packages/gdb.yml
+  - file: packages/libtool.yml
+  - file: packages/meson.yml
+  - file: packages/mlibc.yml
+  - file: packages/pkgconf.yml

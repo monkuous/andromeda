@@ -1,0 +1,2 @@
+CompileFlags:
+    Add: [--target=i486-unknown-linux-gnu]

@@ -1,0 +1,126 @@
+diff --git clean/fixincludes/mkfixinc.sh patched/fixincludes/mkfixinc.sh
+index df90720..b4ede66 100755
+--- clean/fixincludes/mkfixinc.sh
++++ patched/fixincludes/mkfixinc.sh
+@@ -20,7 +20,8 @@ case $machine in
+     powerpcle-*-eabisim* | \
+     powerpcle-*-eabi* | \
+     *-*-vxworks7* | \
+-    *-musl* )
++    *-musl* | \
++    *-mlibc* )
+ 	#  IF there is no include fixing,
+ 	#  THEN create a no-op fixer and exit
+ 	(echo "#! /bin/sh" ; echo "exit 0" ) > ${target}
+diff --git patched/gcc/config/andromeda.h patched/gcc/config/andromeda.h
+new file mode 100644
+index 0000000..2244798
+--- /dev/null
++++ patched/gcc/config/andromeda.h
+@@ -0,0 +1,27 @@
++#undef TARGET_ANDROMEDA
++#define TARGET_ANDROMEDA 1
++
++#undef LIB_SPEC
++#define LIB_SPEC "-lc"
++
++#undef STARTFILE_SPEC
++#define STARTFILE_SPEC "%{!shared: %{" PIE_SPEC ":Scrt0.o%s;:crt0.o%s}}" \
++                       " crti.o%s"                                       \
++                       " %{shared|static-pie|" PIE_SPEC ":crtbeginS.o%s;:crtbegin.o%s}"
++
++#undef ENDFILE_SPEC
++#define ENDFILE_SPEC "%{shared|static-pie|" PIE_SPEC ":crtendS.o%s;:crtend.o%s}" \
++                     " crtn.o%s"
++
++#define GNU_USER_LINK_EMULATION "elf_i386"
++#define GNU_USER_DYNAMIC_LINKER "/usr/lib/ld.so"
++
++#undef TARGET_OS_CPP_BUILTINS
++#define TARGET_OS_CPP_BUILTINS()         \
++  do {                                   \
++    builtin_define ("__andromeda__");    \
++    builtin_define ("__unix__");         \
++    builtin_assert ("system=andromeda"); \
++    builtin_assert ("system=unix");      \
++    builtin_assert ("system=posix");     \
++  } while (0);
+diff --git clean/gcc/config.gcc patched/gcc/config.gcc
+index 95c91ee..85fb496 100644
+--- clean/gcc/config.gcc
++++ patched/gcc/config.gcc
+@@ -878,6 +878,16 @@ case ${target} in
+   rust_target_objs="${rust_target_objs} freebsd-rust.o"
+   target_has_targetrustm=yes
+   ;;
++*-*-mlibc*)
++  gas=yes
++  gnu_ld=yes
++  default_use_cxa_atexit=yes
++  use_gcc_stdint=wrap
++  tmake_file="${tmake_file} t-slibgcc"
++  case ${enable_threads} in
++    "" | yes | posix) thread_file='posix' ;;
++  esac
++  ;;
+ *-*-fuchsia*)
+   native_system_header_dir=/include
+   tmake_file="t-fuchsia"
+@@ -2284,6 +2294,9 @@ i[34567]86-*-mingw* | x86_64-*-mingw*)
+ 			;;
+ 	esac
+ 	;;
++i[34567]86-*-andromeda*)
++	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h gnu-user.h glibc-stdint.h i386/gnu-user-common.h i386/gnu-user.h andromeda.h"
++	;;
+ x86_64-*-fuchsia*)
+ 	tmake_file="${tmake_file} i386/t-x86_64-elf"
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h newlib-stdint.h i386/i386elf.h i386/x86-64.h fuchsia.h"
+diff --git clean/libgcc/config.host patched/libgcc/config.host
+index e75a7af..90903ee 100644
+--- clean/libgcc/config.host
++++ patched/libgcc/config.host
+@@ -300,6 +300,11 @@ case ${host} in
+       ;;
+   esac
+   ;;
++*-*-mlibc*)
++  extra_parts="$extra_parts crtbegin.o crtbeginS.o crtend.o crtendS.o"
++  tmake_file="$tmake_file t-crtstuff-pic"
++  tmake_file="$tmake_file t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver t-libgcc-pic"
++  ;;
+ *-*-fuchsia*)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip t-slibgcc t-slibgcc-fuchsia"
+   extra_parts="crtbegin.o crtend.o"
+@@ -749,6 +754,10 @@ x86_64-*-elf* | x86_64-*-rtems*)
+ 	    ;;
+ 	esac
+ 	;;
++i[34567]86-*-mlibc*)
++	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
++	tmake_file="$tmake_file i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"
++	;;
+ x86_64-*-fuchsia*)
+ 	tmake_file="$tmake_file t-libgcc-pic"
+ 	;;
+diff --git clean/libstdc++-v3/crossconfig.m4 patched/libstdc++-v3/crossconfig.m4
+index b3269cb..8a654d2 100644
+--- clean/libstdc++-v3/crossconfig.m4
++++ patched/libstdc++-v3/crossconfig.m4
+@@ -136,6 +136,16 @@ case "${host}" in
+     AC_CHECK_FUNCS(uselocale)
+     ;;
+ 
++  *-mlibc*)
++    GLIBCXX_CHECK_COMPILER_FEATURES
++    GLIBCXX_CHECK_LINKER_FEATURES
++    GLIBCXX_CHECK_MATH_SUPPORT
++    GLIBCXX_CHECK_STDLIB_SUPPORT
++    GCC_CHECK_TLS
++    AC_CHECK_FUNCS(aligned_alloc posix_memalign memalign _aligned_malloc)
++    AC_CHECK_FUNCS(timespec_get)
++    ;;
++
+   *-fuchsia*)
+     SECTION_FLAGS='-ffunction-sections -fdata-sections'
+     AC_SUBST(SECTION_FLAGS)

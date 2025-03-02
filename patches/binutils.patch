@@ -1,0 +1,53 @@
+diff --git clean/bfd/config.bfd patched/bfd/config.bfd
+index 0d79011..f5835f7 100644
+--- clean/bfd/config.bfd
++++ patched/bfd/config.bfd
+@@ -665,6 +665,10 @@ case "${targ}" in
+     targ_selvecs=
+     targ64_selvecs=x86_64_elf64_vec
+     ;;
++  i[3-7]86-*-andromeda*)
++    targ_defvec=i386_elf32_vec
++    targ_selvecs=
++    ;;
+ #ifdef BFD64
+   x86_64-*-cloudabi*)
+     targ_defvec=x86_64_elf64_cloudabi_vec
+diff --git clean/gas/configure.tgt patched/gas/configure.tgt
+index 7c81bff..7bdc071 100644
+--- clean/gas/configure.tgt
++++ patched/gas/configure.tgt
+@@ -229,6 +229,7 @@ case ${generic_target} in
+   i386-*-beos*)				fmt=elf ;;
+   i386-*-elfiamcu)			fmt=elf arch=iamcu ;;
+   i386-*-elf*)				fmt=elf ;;
++  i386-*-andromeda*)                    fmt=elf ;;
+   i386-*-fuchsia*)			fmt=elf ;;
+   i386-*-haiku*)			fmt=elf em=haiku ;;
+   i386-*-genode*)			fmt=elf ;;
+diff --git clean/gprofng/libcollector/configure.ac patched/gprofng/libcollector/configure.ac
+index 3205da3..be5d23c 100644
+--- clean/gprofng/libcollector/configure.ac
++++ patched/gprofng/libcollector/configure.ac
+@@ -18,7 +18,7 @@ dnl <http://www.gnu.org/licenses/>.
+ 
+ m4_include([../../bfd/version.m4])
+ AC_INIT([gprofng], [BFD_VERSION])
+-AC_CONFIG_MACRO_DIRS([../../config ../..])
++#AC_CONFIG_MACRO_DIRS([../../config ../..])
+ AC_CONFIG_AUX_DIR(../..)
+ AC_CANONICAL_TARGET
+ AM_INIT_AUTOMAKE
+diff --git clean/ld/configure.tgt patched/ld/configure.tgt
+index ea01ccf..2566724 100644
+--- clean/ld/configure.tgt
++++ patched/ld/configure.tgt
+@@ -384,6 +384,8 @@ i[3-7]86-*-linux-*)	targ_emul=elf_i386
+ i[3-7]86-*-redox*)	targ_emul=elf_i386
+ 			targ_extra_emuls=elf_x86_64
+ 			;;
++i[3-8]86-*-andromeda*)	targ_emul=elf_i386
++			;;
+ i[3-7]86-*-solaris2*)	targ_emul=elf_i386_sol2
+ 			targ_extra_emuls="elf_i386_ldso elf_i386 elf_iamcu elf_x86_64_sol2 elf_x86_64"
+ 			targ_extra_libpath=$targ_extra_emuls

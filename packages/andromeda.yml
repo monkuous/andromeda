@@ -1,0 +1,6 @@
+packages:
+  - name: andromeda
+    architecture: noarch
+    source:
+      subdir: ports
+      version: '0.0pl@ROLLING_ID@'

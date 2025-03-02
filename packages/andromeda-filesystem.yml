@@ -1,0 +1,25 @@
+packages:
+  - name: andromeda-filesystem
+    implict_package: true
+    architecture: noarch
+    source:
+      subdir: ports
+      version: '0.0.0'
+    build:
+      - args:
+          - 'mkdir'
+          - '-p'
+          - '@THIS_COLLECT_DIR@/usr/bin'
+          - '@THIS_COLLECT_DIR@/usr/lib'
+      - args:
+          - 'ln'
+          - '-sf'
+          - 'bin'
+          - '@THIS_COLLECT_DIR@/usr/sbin'
+      - args:
+          - 'ln'
+          - '-sf'
+          - 'usr/bin'
+          - 'usr/lib'
+          - 'usr/sbin'
+          - '@THIS_COLLECT_DIR@'

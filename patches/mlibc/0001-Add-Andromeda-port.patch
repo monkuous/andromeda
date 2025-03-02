@@ -1,0 +1,1079 @@
+From 31a8adebc8b4d2bef8d8720bf7c9d0eff18f6863 Mon Sep 17 00:00:00 2001
+From: monkuous <84319635+monkuous@users.noreply.github.com>
+Date: Sun, 2 Mar 2025 22:07:04 +0100
+Subject: [PATCH] Add Andromeda port
+
+---
+ meson.build                                   |  16 +-
+ options/ansi/include/bits/ansi/time_t.h       |   4 +-
+ options/internal/include/bits/off_t.h         |   6 +-
+ sysdeps/andromeda/crt/Scrt0.S                 |  27 +++
+ sysdeps/andromeda/crt/crt0.S                  |  23 +++
+ sysdeps/andromeda/crt/crti.S                  |  20 ++
+ sysdeps/andromeda/crt/crtn.S                  |  12 ++
+ sysdeps/andromeda/crt/meson.build             |  13 ++
+ sysdeps/andromeda/generic/entry.cpp           |  17 ++
+ sysdeps/andromeda/generic/generic.cpp         | 176 ++++++++++++++++++
+ sysdeps/andromeda/generic/meson.build         |   2 +
+ sysdeps/andromeda/include/abi-bits/access.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/auxv.h     |   1 +
+ sysdeps/andromeda/include/abi-bits/blkcnt_t.h |   1 +
+ .../andromeda/include/abi-bits/blksize_t.h    |   1 +
+ .../andromeda/include/abi-bits/clockid_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/dev_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/epoll.h    |  12 ++
+ sysdeps/andromeda/include/abi-bits/errno.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/fcntl.h    |   1 +
+ .../andromeda/include/abi-bits/fsblkcnt_t.h   |   1 +
+ .../andromeda/include/abi-bits/fsfilcnt_t.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/gid_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/in.h       |   1 +
+ sysdeps/andromeda/include/abi-bits/ino_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/inotify.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/ioctls.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/ipc.h      |   1 +
+ sysdeps/andromeda/include/abi-bits/limits.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/mode_t.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/mqueue.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/msg.h      |   1 +
+ sysdeps/andromeda/include/abi-bits/nlink_t.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/packet.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/pid_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/poll.h     |   1 +
+ sysdeps/andromeda/include/abi-bits/ptrace.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/random.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/reboot.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/resource.h |   1 +
+ sysdeps/andromeda/include/abi-bits/rlim_t.h   |   1 +
+ .../andromeda/include/abi-bits/seek-whence.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/shm.h      |   1 +
+ sysdeps/andromeda/include/abi-bits/sigevent.h |   1 +
+ sysdeps/andromeda/include/abi-bits/signal.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/sigval.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/socket.h   |   1 +
+ .../andromeda/include/abi-bits/socklen_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/stat.h     |   1 +
+ sysdeps/andromeda/include/abi-bits/statfs.h   |   1 +
+ sysdeps/andromeda/include/abi-bits/statvfs.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/statx.h    |   1 +
+ .../andromeda/include/abi-bits/suseconds_t.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/termios.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/time.h     |   1 +
+ sysdeps/andromeda/include/abi-bits/uid_t.h    |   1 +
+ sysdeps/andromeda/include/abi-bits/utsname.h  |   1 +
+ sysdeps/andromeda/include/abi-bits/vm-flags.h |   1 +
+ sysdeps/andromeda/include/abi-bits/vt.h       |   1 +
+ sysdeps/andromeda/include/abi-bits/wait.h     |   1 +
+ sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
+ sysdeps/andromeda/include/andromeda/syscall.h |  18 ++
+ sysdeps/andromeda/include/meson.build         |  57 ++++++
+ sysdeps/andromeda/meson.build                 |  13 ++
+ 64 files changed, 456 insertions(+), 9 deletions(-)
+ create mode 100644 sysdeps/andromeda/crt/Scrt0.S
+ create mode 100644 sysdeps/andromeda/crt/crt0.S
+ create mode 100644 sysdeps/andromeda/crt/crti.S
+ create mode 100644 sysdeps/andromeda/crt/crtn.S
+ create mode 100644 sysdeps/andromeda/crt/meson.build
+ create mode 100644 sysdeps/andromeda/generic/entry.cpp
+ create mode 100644 sysdeps/andromeda/generic/generic.cpp
+ create mode 100644 sysdeps/andromeda/generic/meson.build
+ create mode 120000 sysdeps/andromeda/include/abi-bits/access.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/auxv.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/blkcnt_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/blksize_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/clockid_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/dev_t.h
+ create mode 100644 sysdeps/andromeda/include/abi-bits/epoll.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/errno.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/fcntl.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/fsblkcnt_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/fsfilcnt_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/gid_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/in.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/ino_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/inotify.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/ioctls.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/ipc.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/limits.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/mode_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/mqueue.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/msg.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/nlink_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/packet.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/pid_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/poll.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/ptrace.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/random.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/reboot.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/resource.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/rlim_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/seek-whence.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/shm.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/sigevent.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/signal.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/sigval.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/socket.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/socklen_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/stat.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/statfs.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/statvfs.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/statx.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/suseconds_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/termios.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/time.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/uid_t.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/utsname.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/vm-flags.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/vt.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/wait.h
+ create mode 120000 sysdeps/andromeda/include/abi-bits/xattr.h
+ create mode 100644 sysdeps/andromeda/include/andromeda/syscall.h
+ create mode 100644 sysdeps/andromeda/include/meson.build
+ create mode 100644 sysdeps/andromeda/meson.build
+
+diff --git a/meson.build b/meson.build
+index eae40c4f..33fc9a30 100644
+--- a/meson.build
++++ b/meson.build
+@@ -17,6 +17,8 @@ libc_include_dirs = [
+ 	include_directories('options/internal' / host_machine.cpu_family() + '-include')
+ ]
+ 
++compiler_include_dirs = [ ]
++
+ rtld_sources = [ ]
+ rtld_dso_sources = [ ]
+ libc_sources = [ ]
+@@ -99,12 +101,10 @@ if not headers_only
+ 		endif
+ 
+ 		if c_compiler.get_id() == 'gcc' and fs.exists(ccdir / 'include-fixed')
+-			rtld_include_dirs += include_directories(ccdir / 'include-fixed')
+-			libc_include_dirs += include_directories(ccdir / 'include-fixed')
++			compiler_include_dirs += include_directories(ccdir / 'include-fixed')
+ 		endif
+ 
+-		rtld_include_dirs += include_directories(ccdir / 'include')
+-		libc_include_dirs += include_directories(ccdir / 'include')
++		compiler_include_dirs += include_directories(ccdir / 'include')
+ 	endif
+ 
+ 	if not freestnd_cxx_hdrs_dep.found()
+@@ -155,8 +155,7 @@ if not headers_only
+ 			endif
+ 		endforeach
+ 
+-		rtld_include_dirs += cplusplus_include_path
+-		libc_include_dirs += cplusplus_include_path
++		compiler_include_dirs += cplusplus_include_path
+ 	endif
+ endif
+ 
+@@ -258,6 +257,8 @@ elif host_machine.system() == 'astral'
+ 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+ 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+ 	subdir('sysdeps/astral')
++elif host_machine.system() == 'andromeda'
++	subdir('sysdeps/andromeda')
+ else
+ 	error('No sysdeps defined for OS: ' + host_machine.system())
+ endif
+@@ -321,6 +322,9 @@ libc_include_dirs += include_directories('.')
+ 
+ #----------------------------------------------------------------------------------------
+ 
++rtld_include_dirs += compiler_include_dirs
++libc_include_dirs += compiler_include_dirs
++
+ configure_file(input: 'internal-config.h.in',
+ 	output: 'internal-config.h',
+ 	configuration: internal_conf)
+diff --git a/options/ansi/include/bits/ansi/time_t.h b/options/ansi/include/bits/ansi/time_t.h
+index 1c29fa0f..88600a8e 100644
+--- a/options/ansi/include/bits/ansi/time_t.h
++++ b/options/ansi/include/bits/ansi/time_t.h
+@@ -2,7 +2,9 @@
+ #ifndef MLIBC_TIME_T
+ #define MLIBC_TIME_T
+ 
+-typedef long time_t;
++#include <bits/types.h>
++
++typedef __mlibc_int64 time_t;
+ 
+ #endif
+ 
+diff --git a/options/internal/include/bits/off_t.h b/options/internal/include/bits/off_t.h
+index 43dcd9ed..277c5b78 100644
+--- a/options/internal/include/bits/off_t.h
++++ b/options/internal/include/bits/off_t.h
+@@ -1,8 +1,10 @@
+ #ifndef MLIBC_OFF_T_H
+ #define MLIBC_OFF_T_H
+ 
++#include <bits/types.h>
++
+ /* TODO: use something like int64_t instead? */
+-typedef long off_t;
+-typedef long off64_t;
++typedef __mlibc_int64 off_t;
++typedef __mlibc_int64 off64_t;
+ 
+ #endif /* MLIBC_OFF_T_H */
+diff --git a/sysdeps/andromeda/crt/Scrt0.S b/sysdeps/andromeda/crt/Scrt0.S
+new file mode 100644
+index 00000000..a979b033
+--- /dev/null
++++ b/sysdeps/andromeda/crt/Scrt0.S
+@@ -0,0 +1,27 @@
++.text
++
++.balign 16
++.globl _start
++.hidden _start
++.type _start, @function
++_start:
++	.cfi_startproc
++	.cfi_undefined eip
++
++	xor %ebp, %ebp
++	mov %esp, %eax
++
++    call 1f
++1:  pop %ebx
++    add $(_GLOBAL_OFFSET_TABLE_ - 1b), %ebx
++
++	sub $8, %esp
++	pushl %eax
++	pushl main@GOT(%ebx)
++	call __mlibc_entry
++	ud2
++
++	.cfi_endproc
++.size _start, . - _start
++
++.section .note.GNU-stack,"",@progbits
+diff --git a/sysdeps/andromeda/crt/crt0.S b/sysdeps/andromeda/crt/crt0.S
+new file mode 100644
+index 00000000..be0d4346
+--- /dev/null
++++ b/sysdeps/andromeda/crt/crt0.S
+@@ -0,0 +1,23 @@
++.text
++
++.balign 16
++.globl _start
++.hidden _start
++.type _start, @function
++_start:
++	.cfi_startproc
++	.cfi_undefined eip
++
++	xor %ebp, %ebp
++	mov %esp, %eax
++
++	sub $8, %esp
++	pushl %eax
++	pushl $main
++	call __mlibc_entry
++	ud2
++
++	.cfi_endproc
++.size _start, . - _start
++
++.section .note.GNU-stack,"",@progbits
+diff --git a/sysdeps/andromeda/crt/crti.S b/sysdeps/andromeda/crt/crti.S
+new file mode 100644
+index 00000000..47f6d64f
+--- /dev/null
++++ b/sysdeps/andromeda/crt/crti.S
+@@ -0,0 +1,20 @@
++.section ".init", "ax", @progbits
++
++.globl _init
++.hidden _init
++.type _init, @function
++_init:
++	push %ebp
++	mov %esp, %ebp
++
++.section ".fini", "ax", @progbits
++
++.globl _fini
++.hidden _fini
++.type _fini, @function
++_fini:
++	push %ebp
++	mov %esp, %ebp
++
++.section .note.GNU-stack,"",@progbits
++
+diff --git a/sysdeps/andromeda/crt/crtn.S b/sysdeps/andromeda/crt/crtn.S
+new file mode 100644
+index 00000000..3cb40b8c
+--- /dev/null
++++ b/sysdeps/andromeda/crt/crtn.S
+@@ -0,0 +1,12 @@
++.section ".init", "ax", @progbits
++
++	leave
++	ret
++
++.section ".fini", "ax", @progbits
++
++	leave
++	ret
++
++.section .note.GNU-stack,"",@progbits
++
+diff --git a/sysdeps/andromeda/crt/meson.build b/sysdeps/andromeda/crt/meson.build
+new file mode 100644
+index 00000000..ae05517d
+--- /dev/null
++++ b/sysdeps/andromeda/crt/meson.build
+@@ -0,0 +1,13 @@
++if not headers_only
++    foreach name : ['crt0', 'crti', 'crtn', 'Scrt0']
++        custom_target(
++            name,
++            build_by_default: true,
++            command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
++            input: name + '.S',
++            install: true,
++            install_dir: get_option('libdir'),
++            output: name + '.o'
++        )
++    endforeach
++endif
+diff --git a/sysdeps/andromeda/generic/entry.cpp b/sysdeps/andromeda/generic/entry.cpp
+new file mode 100644
+index 00000000..6e28747f
+--- /dev/null
++++ b/sysdeps/andromeda/generic/entry.cpp
+@@ -0,0 +1,17 @@
++#include "mlibc/elf/startup.h"
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <sys/auxv.h>
++
++extern "C" void __dlapi_enter(uintptr_t *);
++
++extern char **environ;
++
++size_t __hwcap;
++
++extern "C" [[noreturn]] void __mlibc_entry(int (*main)(int, char *[], char *[]), uintptr_t *stack) {
++    __dlapi_enter(stack);
++    __hwcap = getauxval(AT_HWCAP);
++    exit(main(mlibc::entry_stack.argc, mlibc::entry_stack.argv, environ));
++}
+diff --git a/sysdeps/andromeda/generic/generic.cpp b/sysdeps/andromeda/generic/generic.cpp
+new file mode 100644
+index 00000000..78a004cc
+--- /dev/null
++++ b/sysdeps/andromeda/generic/generic.cpp
+@@ -0,0 +1,176 @@
++#include "abi-bits/vm-flags.h"
++#include "andromeda/syscall.h"
++#include "mlibc/ansi-sysdeps.hpp"
++#include <errno.h>
++#include <mlibc/all-sysdeps.hpp>
++#include <stdlib.h>
++#include <string.h>
++
++typedef struct {
++	long result;
++	long error;
++} syscall_result_t;
++
++#define SYSCALL0(num)                                                                              \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80" : "=a"(r.result), "=d"(r.error) : "a"(num) : "memory");           \
++		r;                                                                                         \
++	})
++
++#define SYSCALL1(num, a0)                                                                          \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80" : "=a"(r.result), "=d"(r.error) : "a"(num), "b"(a0) : "memory");  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL2(num, a0, a1)                                                                      \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80"                                                                   \
++		             : "=a"(r.result), "=d"(r.error)                                               \
++		             : "a"(num), "b"(a0), "c"(a1)                                                  \
++		             : "memory");                                                                  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL3(num, a0, a1, a2)                                                                  \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80"                                                                   \
++		             : "=a"(r.result), "=d"(r.error)                                               \
++		             : "a"(num), "b"(a0), "c"(a1), "d"(a2)                                         \
++		             : "memory");                                                                  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL4(num, a0, a1, a2, a3)                                                              \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80"                                                                   \
++		             : "=a"(r.result), "=d"(r.error)                                               \
++		             : "a"(num), "b"(a0), "c"(a1), "d"(a2), "S"(a3)                                \
++		             : "memory");                                                                  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL5(num, a0, a1, a2, a3, a4)                                                          \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("int $0x80"                                                                   \
++		             : "=a"(r.result), "=d"(r.error)                                               \
++		             : "a"(num), "b"(a0), "c"(a1), "d"(a2), "S"(a3), "D"(a4)                       \
++		             : "memory");                                                                  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL(n, vec, ...)                                                                       \
++	({                                                                                             \
++		syscall_result_t r = SYSCALL##n(vec, ##__VA_ARGS__);                                       \
++		if (__builtin_expect(r.error, 0))                                                          \
++			return r.error;                                                                        \
++		r.result;                                                                                  \
++	})
++
++namespace mlibc {
++void sys_libc_log(const char *message) { SYSCALL2(SYS_KLOG, message, strlen(message)); }
++
++int sys_anon_allocate(size_t size, void **pointer) {
++	return sys_vm_map(
++	    NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0, pointer
++	);
++}
++
++int sys_anon_free(void *pointer, size_t size) { return sys_vm_unmap(pointer, size); }
++
++int sys_vm_map(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
++	if (size & 0xfff) {
++        return EINVAL;
++    }
++
++    if (flags & 0xf0000000) {
++        return EINVAL;
++    }
++
++    if (offset & ~(off_t)0xffffffff000) {
++        return EINVAL;
++    }
++
++	*window = (void *)SYSCALL(5, SYS_MMAP, hint, size >> 12, (prot << 28) | flags, fd, (long)(offset >> 12));
++	return 0;
++}
++
++int sys_vm_unmap(void *pointer, size_t size) {
++	SYSCALL(2, SYS_MUNMAP, pointer, size);
++	return 0;
++}
++
++void sys_libc_panic() {
++    sys_kill(sys_getpid(), SIGABRT);
++    __builtin_trap();
++}
++
++int sys_tcb_set(void *pointer) {
++	SYSCALL1(SYS_SET_TCB, pointer);
++	return 0;
++}
++
++int sys_futex_wake(int *pointer) {
++	SYSCALL(1, SYS_FUTEX_WAKE, pointer);
++	return 0;
++}
++
++int sys_futex_wait(int *pointer, int expected, const struct timespec *time) {
++	SYSCALL(5, SYS_FUTEX_WAIT, pointer, expected, (long)time->tv_sec, (long)(time->tv_sec >> 32), time->tv_nsec);
++	return 0;
++}
++
++int sys_seek(int fd, off_t offset, int whence, off_t *new_offset) {
++	long low = offset;
++	long high = offset >> 32;
++
++	syscall_result_t result = SYSCALL4(SYS_SEEK, fd, low, high, whence);
++	if (__builtin_expect(!!(result.error < 0), 0)) {
++        return -result.error;
++    }
++
++	*new_offset = ((off_t)result.error << 32) | result.result;
++	return 0;
++}
++
++int sys_read(int fd, void *buf, size_t count, ssize_t *bytes_read) {
++    *bytes_read = SYSCALL(3, SYS_READ, fd, buf, count);
++    return 0;
++}
++
++int sys_close(int fd) {
++    SYSCALL(1, SYS_CLOSE, fd);
++    return 0;
++}
++
++int sys_open(const char *pathname, int flags, mode_t mode, int *fd) {
++    return sys_openat(AT_FDCWD, pathname, flags, mode, fd);
++}
++
++int sys_clock_get(int clock, time_t *secs, long *nanos) {
++    syscall_result_t result = SYSCALL1(SYS_CLOCK_GET, clock);
++    if (__builtin_expect(!!(result.error < 0), 0)) {
++        return -result.error;
++    }
++
++    *secs = result.result;
++    *nanos = result.error;
++    return 0;
++}
++
++void sys_exit(int status) {
++    SYSCALL1(SYS_EXIT, status);
++    __builtin_unreachable();
++}
++
++int sys_write(int fd, const void *buf, size_t count, ssize_t *bytes_written) {
++    *bytes_written = SYSCALL(3, SYS_WRITE, fd, buf, count);
++    return 0;
++}
++}; // namespace mlibc
+diff --git a/sysdeps/andromeda/generic/meson.build b/sysdeps/andromeda/generic/meson.build
+new file mode 100644
+index 00000000..191e9883
+--- /dev/null
++++ b/sysdeps/andromeda/generic/meson.build
+@@ -0,0 +1,2 @@
++rtld_sources += files('generic.cpp')
++libc_sources += files('entry.cpp', 'generic.cpp')
+diff --git a/sysdeps/andromeda/include/abi-bits/access.h b/sysdeps/andromeda/include/abi-bits/access.h
+new file mode 120000
+index 00000000..cb839316
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/access.h
+@@ -0,0 +1 @@
++../../../../abis/linux/access.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/auxv.h b/sysdeps/andromeda/include/abi-bits/auxv.h
+new file mode 120000
+index 00000000..c43f8786
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/auxv.h
+@@ -0,0 +1 @@
++../../../../abis/linux/auxv.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/blkcnt_t.h b/sysdeps/andromeda/include/abi-bits/blkcnt_t.h
+new file mode 120000
+index 00000000..0b0ec270
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/blkcnt_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/blkcnt_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/blksize_t.h b/sysdeps/andromeda/include/abi-bits/blksize_t.h
+new file mode 120000
+index 00000000..7dc8d7cf
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/blksize_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/blksize_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/clockid_t.h b/sysdeps/andromeda/include/abi-bits/clockid_t.h
+new file mode 120000
+index 00000000..6a42da56
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/clockid_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/clockid_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/dev_t.h b/sysdeps/andromeda/include/abi-bits/dev_t.h
+new file mode 120000
+index 00000000..bca881e9
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/dev_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/dev_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/epoll.h b/sysdeps/andromeda/include/abi-bits/epoll.h
+new file mode 100644
+index 00000000..ebfcda51
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/epoll.h
+@@ -0,0 +1,12 @@
++#ifndef _ABIBITS_EPOLL_H
++#define _ABIBITS_EPOLL_H
++
++#include <mlibc-config.h>
++
++#if !__MLIBC_LINUX_OPTION
++#  error "<sys/epoll.h> is inherently Linux specific. Enable the Linux option or do not use this header."
++#endif /* !__MLIBC_LINUX_OPTION */
++
++#define EPOLL_CLOEXEC 02000000 /* Same as __MLIBC_O_CLOEXEC */
++
++#endif /* _ABIBITS_EPOLL_H */
+diff --git a/sysdeps/andromeda/include/abi-bits/errno.h b/sysdeps/andromeda/include/abi-bits/errno.h
+new file mode 120000
+index 00000000..6e507def
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/errno.h
+@@ -0,0 +1 @@
++../../../../abis/linux/errno.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/fcntl.h b/sysdeps/andromeda/include/abi-bits/fcntl.h
+new file mode 120000
+index 00000000..463e2c95
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/fcntl.h
+@@ -0,0 +1 @@
++../../../../abis/linux/fcntl.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/fsblkcnt_t.h b/sysdeps/andromeda/include/abi-bits/fsblkcnt_t.h
+new file mode 120000
+index 00000000..898dfb2f
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/fsblkcnt_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/fsblkcnt_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/fsfilcnt_t.h b/sysdeps/andromeda/include/abi-bits/fsfilcnt_t.h
+new file mode 120000
+index 00000000..791755c9
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/fsfilcnt_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/fsfilcnt_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/gid_t.h b/sysdeps/andromeda/include/abi-bits/gid_t.h
+new file mode 120000
+index 00000000..abce6d69
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/gid_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/gid_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/in.h b/sysdeps/andromeda/include/abi-bits/in.h
+new file mode 120000
+index 00000000..418d1d5c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/in.h
+@@ -0,0 +1 @@
++../../../../abis/linux/in.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/ino_t.h b/sysdeps/andromeda/include/abi-bits/ino_t.h
+new file mode 120000
+index 00000000..4c20aca2
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/ino_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/ino_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/inotify.h b/sysdeps/andromeda/include/abi-bits/inotify.h
+new file mode 120000
+index 00000000..b5cb2823
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/inotify.h
+@@ -0,0 +1 @@
++../../../../abis/linux/inotify.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/ioctls.h b/sysdeps/andromeda/include/abi-bits/ioctls.h
+new file mode 120000
+index 00000000..595106b6
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/ioctls.h
+@@ -0,0 +1 @@
++../../../../abis/linux/ioctls.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/ipc.h b/sysdeps/andromeda/include/abi-bits/ipc.h
+new file mode 120000
+index 00000000..2c7ffc4c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/ipc.h
+@@ -0,0 +1 @@
++../../../../abis/linux/ipc.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/limits.h b/sysdeps/andromeda/include/abi-bits/limits.h
+new file mode 120000
+index 00000000..6c88db2e
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/limits.h
+@@ -0,0 +1 @@
++../../../../abis/linux/limits.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/mode_t.h b/sysdeps/andromeda/include/abi-bits/mode_t.h
+new file mode 120000
+index 00000000..5d78fdfc
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/mode_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/mode_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/mqueue.h b/sysdeps/andromeda/include/abi-bits/mqueue.h
+new file mode 120000
+index 00000000..fa87b078
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/mqueue.h
+@@ -0,0 +1 @@
++../../../../abis/linux/mqueue.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/msg.h b/sysdeps/andromeda/include/abi-bits/msg.h
+new file mode 120000
+index 00000000..f402b493
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/msg.h
+@@ -0,0 +1 @@
++../../../../abis/linux/msg.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/nlink_t.h b/sysdeps/andromeda/include/abi-bits/nlink_t.h
+new file mode 120000
+index 00000000..bb3b625c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/nlink_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/nlink_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/packet.h b/sysdeps/andromeda/include/abi-bits/packet.h
+new file mode 120000
+index 00000000..998ef1ab
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/packet.h
+@@ -0,0 +1 @@
++../../../../abis/linux/packet.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/pid_t.h b/sysdeps/andromeda/include/abi-bits/pid_t.h
+new file mode 120000
+index 00000000..baa90f6a
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/pid_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/pid_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/poll.h b/sysdeps/andromeda/include/abi-bits/poll.h
+new file mode 120000
+index 00000000..8ea6a0a3
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/poll.h
+@@ -0,0 +1 @@
++../../../../abis/linux/poll.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/ptrace.h b/sysdeps/andromeda/include/abi-bits/ptrace.h
+new file mode 120000
+index 00000000..b2517b2c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/ptrace.h
+@@ -0,0 +1 @@
++../../../../abis/linux/ptrace.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/random.h b/sysdeps/andromeda/include/abi-bits/random.h
+new file mode 120000
+index 00000000..83fc3d96
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/random.h
+@@ -0,0 +1 @@
++../../../../abis/linux/random.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/reboot.h b/sysdeps/andromeda/include/abi-bits/reboot.h
+new file mode 120000
+index 00000000..77013a41
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/reboot.h
+@@ -0,0 +1 @@
++../../../../abis/linux/reboot.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/resource.h b/sysdeps/andromeda/include/abi-bits/resource.h
+new file mode 120000
+index 00000000..88d74025
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/resource.h
+@@ -0,0 +1 @@
++../../../../abis/linux/resource.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/rlim_t.h b/sysdeps/andromeda/include/abi-bits/rlim_t.h
+new file mode 120000
+index 00000000..e92eb5fb
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/rlim_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/rlim_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/seek-whence.h b/sysdeps/andromeda/include/abi-bits/seek-whence.h
+new file mode 120000
+index 00000000..df7bccf0
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/seek-whence.h
+@@ -0,0 +1 @@
++../../../../abis/linux/seek-whence.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/shm.h b/sysdeps/andromeda/include/abi-bits/shm.h
+new file mode 120000
+index 00000000..067d8c4f
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/shm.h
+@@ -0,0 +1 @@
++../../../../abis/linux/shm.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/sigevent.h b/sysdeps/andromeda/include/abi-bits/sigevent.h
+new file mode 120000
+index 00000000..83d069b5
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/sigevent.h
+@@ -0,0 +1 @@
++../../../../abis/linux/sigevent.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/signal.h b/sysdeps/andromeda/include/abi-bits/signal.h
+new file mode 120000
+index 00000000..4dcb0b7c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/signal.h
+@@ -0,0 +1 @@
++../../../../abis/linux/signal.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/sigval.h b/sysdeps/andromeda/include/abi-bits/sigval.h
+new file mode 120000
+index 00000000..ccd43a55
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/sigval.h
+@@ -0,0 +1 @@
++../../../../abis/linux/sigval.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/socket.h b/sysdeps/andromeda/include/abi-bits/socket.h
+new file mode 120000
+index 00000000..f1dc016e
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/socket.h
+@@ -0,0 +1 @@
++../../../../abis/linux/socket.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/socklen_t.h b/sysdeps/andromeda/include/abi-bits/socklen_t.h
+new file mode 120000
+index 00000000..41f3b11f
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/socklen_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/socklen_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/stat.h b/sysdeps/andromeda/include/abi-bits/stat.h
+new file mode 120000
+index 00000000..1f63b41f
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/stat.h
+@@ -0,0 +1 @@
++../../../../abis/linux/stat.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/statfs.h b/sysdeps/andromeda/include/abi-bits/statfs.h
+new file mode 120000
+index 00000000..e3d202f5
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/statfs.h
+@@ -0,0 +1 @@
++../../../../abis/linux/statfs.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/statvfs.h b/sysdeps/andromeda/include/abi-bits/statvfs.h
+new file mode 120000
+index 00000000..1fc80c2a
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/statvfs.h
+@@ -0,0 +1 @@
++../../../../abis/linux/statvfs.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/statx.h b/sysdeps/andromeda/include/abi-bits/statx.h
+new file mode 120000
+index 00000000..8702a1d0
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/statx.h
+@@ -0,0 +1 @@
++../../../../abis/linux/statx.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/suseconds_t.h b/sysdeps/andromeda/include/abi-bits/suseconds_t.h
+new file mode 120000
+index 00000000..9ed65977
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/suseconds_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/suseconds_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/termios.h b/sysdeps/andromeda/include/abi-bits/termios.h
+new file mode 120000
+index 00000000..ee8f0b09
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/termios.h
+@@ -0,0 +1 @@
++../../../../abis/linux/termios.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/time.h b/sysdeps/andromeda/include/abi-bits/time.h
+new file mode 120000
+index 00000000..2a026257
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/time.h
+@@ -0,0 +1 @@
++../../../../abis/linux/time.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/uid_t.h b/sysdeps/andromeda/include/abi-bits/uid_t.h
+new file mode 120000
+index 00000000..b3067778
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/uid_t.h
+@@ -0,0 +1 @@
++../../../../abis/linux/uid_t.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/utsname.h b/sysdeps/andromeda/include/abi-bits/utsname.h
+new file mode 120000
+index 00000000..b2857547
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/utsname.h
+@@ -0,0 +1 @@
++../../../../abis/linux/utsname.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/vm-flags.h b/sysdeps/andromeda/include/abi-bits/vm-flags.h
+new file mode 120000
+index 00000000..bbe258cf
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/vm-flags.h
+@@ -0,0 +1 @@
++../../../../abis/linux/vm-flags.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/vt.h b/sysdeps/andromeda/include/abi-bits/vt.h
+new file mode 120000
+index 00000000..5798a4ac
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/vt.h
+@@ -0,0 +1 @@
++../../../../abis/linux/vt.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/wait.h b/sysdeps/andromeda/include/abi-bits/wait.h
+new file mode 120000
+index 00000000..feb2840c
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/wait.h
+@@ -0,0 +1 @@
++../../../../abis/linux/wait.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/abi-bits/xattr.h b/sysdeps/andromeda/include/abi-bits/xattr.h
+new file mode 120000
+index 00000000..66412d70
+--- /dev/null
++++ b/sysdeps/andromeda/include/abi-bits/xattr.h
+@@ -0,0 +1 @@
++../../../../abis/linux/xattr.h
+\ No newline at end of file
+diff --git a/sysdeps/andromeda/include/andromeda/syscall.h b/sysdeps/andromeda/include/andromeda/syscall.h
+new file mode 100644
+index 00000000..97b37fe1
+--- /dev/null
++++ b/sysdeps/andromeda/include/andromeda/syscall.h
+@@ -0,0 +1,18 @@
++#ifndef _ANDROMEDA_SYSCALL_H
++#define _ANDROMEDA_SYSCALL_H
++
++#define SYS_KLOG 0
++#define SYS_MMAP 1
++#define SYS_MUNMAP 2
++#define SYS_SET_TCB 3
++#define SYS_FUTEX_WAKE 4
++#define SYS_FUTEX_WAIT 5
++#define SYS_SEEK 6
++#define SYS_READ 7
++#define SYS_CLOSE 8
++#define SYS_OPEN 9
++#define SYS_CLOCK_GET 10
++#define SYS_EXIT 11
++#define SYS_WRITE 12
++
++#endif /* _ANDROMEDA_SYSCALL_H */
+diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build
+new file mode 100644
+index 00000000..66f50cb3
+--- /dev/null
++++ b/sysdeps/andromeda/include/meson.build
+@@ -0,0 +1,57 @@
++if not no_headers
++    install_headers(
++        'abi-bits/access.h',
++        'abi-bits/auxv.h',
++        'abi-bits/blkcnt_t.h',
++        'abi-bits/blksize_t.h',
++        'abi-bits/clockid_t.h',
++        'abi-bits/dev_t.h',
++        'abi-bits/epoll.h',
++        'abi-bits/errno.h',
++        'abi-bits/fcntl.h',
++        'abi-bits/fsblkcnt_t.h',
++        'abi-bits/fsfilcnt_t.h',
++        'abi-bits/gid_t.h',
++        'abi-bits/in.h',
++        'abi-bits/ino_t.h',
++        'abi-bits/inotify.h',
++        'abi-bits/ioctls.h',
++        'abi-bits/ipc.h',
++        'abi-bits/limits.h',
++        'abi-bits/mode_t.h',
++        'abi-bits/mqueue.h',
++        'abi-bits/msg.h',
++        'abi-bits/nlink_t.h',
++        'abi-bits/packet.h',
++        'abi-bits/pid_t.h',
++        'abi-bits/poll.h',
++        'abi-bits/ptrace.h',
++        'abi-bits/random.h',
++        'abi-bits/reboot.h',
++        'abi-bits/resource.h',
++        'abi-bits/rlim_t.h',
++        'abi-bits/seek-whence.h',
++        'abi-bits/shm.h',
++        'abi-bits/sigevent.h',
++        'abi-bits/signal.h',
++        'abi-bits/sigval.h',
++        'abi-bits/socket.h',
++        'abi-bits/socklen_t.h',
++        'abi-bits/stat.h',
++        'abi-bits/statfs.h',
++        'abi-bits/statvfs.h',
++        'abi-bits/statx.h',
++        'abi-bits/suseconds_t.h',
++        'abi-bits/termios.h',
++        'abi-bits/time.h',
++        'abi-bits/uid_t.h',
++        'abi-bits/utsname.h',
++        'abi-bits/vm-flags.h',
++        'abi-bits/vt.h',
++        'abi-bits/wait.h',
++        'abi-bits/xattr.h',
++        'andromeda/syscall.h',
++        follow_symlinks: true,
++        preserve_path: true,
++    )
++endif
+diff --git a/sysdeps/andromeda/meson.build b/sysdeps/andromeda/meson.build
+new file mode 100644
+index 00000000..e8c23a71
+--- /dev/null
++++ b/sysdeps/andromeda/meson.build
+@@ -0,0 +1,13 @@
++sysdep_supported_options = {
++	'posix': true,
++	'linux': false,
++	'glibc': true,
++	'bsd': true,
++}
++
++rtld_include_dirs += include_directories('include')
++libc_include_dirs += include_directories('include')
++
++subdir('crt')
++subdir('include')
++subdir('generic')
+-- 
+2.48.1
+
