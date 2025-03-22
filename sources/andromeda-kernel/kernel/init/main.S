@@ -75,9 +75,9 @@ _start:
     add $0x1000, %edi
     mov %edi, (-0x1000 - TABLE_FLAGS)(%edi)
     mov %edi, (-0x1000 + PDO(KERN_VIRT_BASE) - TABLE_FLAGS)(%edi)
-    mov $(0x1000 | WPAGE_FLAGS), %eax
+    mov $(KERN_PHYS_BASE | WPAGE_FLAGS), %eax
 .Lmap_single:
-    mov %eax, (-TABLE_FLAGS + 4)(%edi)
+    mov %eax, (-TABLE_FLAGS + ((KERN_PHYS_BASE >> 12) * 4))(%edi)
     add $0x1000, %eax
     add $4, %edi
     cmp $PHYS(_end + WPAGE_FLAGS), %eax

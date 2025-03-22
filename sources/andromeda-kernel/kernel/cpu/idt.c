@@ -74,7 +74,7 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
     case GDT_SEL_KTASK: prev = &kernel_tss; break;
     case GDT_SEL_DF_TASK: prev = &dfault_tss; break;
     case GDT_SEL_NMI_TASK: prev = &nmi_tss; break;
-    default: prev = NULL; break;
+    default: prev = nullptr; break;
     }
 
     idt_frame_t frame = {
