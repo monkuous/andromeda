@@ -73,3 +73,16 @@ tools:
                                '@PREFIX@/@OPTION:cpu@-@OPTION:triple@/bin/as']
          - args: ['ln', '-sf', '../../../binutils/@OPTION:cpu@-@OPTION:triple@/bin/ld',
                                '@PREFIX@/@OPTION:cpu@-@OPTION:triple@/bin/ld']
+
+packages:
+  - name: gcc-dylibs
+    implict_package: true
+    architecture: '@OPTION:cpu@'
+    from_source: gcc
+    pkgs_required:
+      - andromeda-filesystem
+    tools_required:
+      - gcc
+    build:
+      - args: ['mkdir', '-p', '@THIS_COLLECT_DIR@/usr/lib']
+      - args: "cp '@BUILD_ROOT@/tools/gcc/@OPTION:cpu@-@OPTION:triple@/lib'/*.so* '@THIS_COLLECT_DIR@/usr/lib'"

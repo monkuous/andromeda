@@ -7,6 +7,8 @@ declare_options:
     default: release
   - name: cpu
     default: i486
+  - name: debugcon
+    default: 'false'
   - name: lto
     default: 'true'
   - name: triple
@@ -17,6 +19,7 @@ tasks:
     pkgs_required:
       - andromeda
     args: ['@SOURCE_ROOT@/support/mkimg.sh', '@BUILD_ROOT@/andromeda.img', '128', '@SYSROOT_DIR@']
+    workdir: '@BUILD_ROOT@'
   - name: qemu-kvm
     tasks_required:
       - make-image
@@ -32,6 +35,7 @@ tasks:
 
 imports:
   - file: packages/andromeda-filesystem.yml
+  - file: packages/andromeda-kernel.yml
   - file: packages/andromeda.yml
   - file: packages/autoconf.yml
   - file: packages/automake.yml

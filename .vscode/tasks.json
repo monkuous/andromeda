@@ -9,6 +9,17 @@
 				"cwd": "${workspaceFolder}/build"
 			},
 			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Andromeda: create disk image",
+			"dependsOn": "Andromeda: rebuild active package",
+			"command": "xbstrap run make-image",
+			"type": "shell",
+			"options": {
+				"cwd": "${workspaceFolder}/build"
+			},
+			"problemMatcher": [],
 			"group": {
 				"kind": "build",
 				"isDefault": true

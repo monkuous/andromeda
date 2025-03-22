@@ -9,6 +9,7 @@ sources:
 
 packages:
   - name: mlibc
+    implict_package: true
     architecture: '@OPTION:cpu@'
     source:
       subdir: ports
@@ -21,6 +22,8 @@ packages:
         - frigg
       regenerate:
         - args: ['ln', '-sf', '../../frigg', '@THIS_SOURCE_DIR@/subprojects/frigg']
+    pkgs_required:
+      - andromeda-filesystem
     tools_required:
       - bootstrap-gcc
       - meson

@@ -3,13 +3,7 @@ set -ue
 # usage: kvm.sh image [args]...
 
 img="$1"
-fwd=tools/ovmf
 shift 1
 
 echo Starting QEMU
-qemu-system-riscv64 -accel kvm -cpu host,migratable=off -M virt \
-        -drive if=pflash,readonly=on,format=raw,file="$fwd/code.fd" \
-        -drive if=pflash,format=raw,file="$fwd/vars.fd" -device ramfb \
-        -device qemu-xhci -device usb-kbd -device virtio-rng-pci \
-        -device ahci,id=ahci -device ide-hd,bus=ahci.0,drive=hd0 \
-        -drive if=none,id=hd0,format=raw,file="$img" "$@"
+qemu-system-i386 -accel kvm -debugcon stdio -M isapc -drive format=raw,file="$img" "$@"

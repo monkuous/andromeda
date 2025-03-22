@@ -17,6 +17,7 @@ cat > bootstrap-site.yml << EOF
 define_options:
   build-type: debug
   cpu: '${1:-i486}'
+  debugcon: 'true'
   lto: 'false'
 EOF
 
