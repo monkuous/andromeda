@@ -3,7 +3,6 @@
 #include "mem/bootmem.h"
 #include "mem/layout.h"
 #include "util/panic.h"
-#include "util/print.h"
 #include <stdint.h>
 
 page_t *page_array;
@@ -59,7 +58,6 @@ static void do_add(uint32_t head, uint32_t tail) {
     }
 
     size_t count = ((tail - head) >> PAGE_SHIFT) + 1;
-    printk("0x%8x-0x%8x (%u)\n", head, tail, count);
 
     page_t *page = phys_to_page(head);
     page->free.count = count;
@@ -75,6 +73,15 @@ void pmem_add_region(uint32_t head, uint32_t tail, uint32_t alloc_tail) {
 
     size_t pages = ((tail - head) >> PAGE_SHIFT) + 1;
     pmem_stats.total += pages;
+
+    if (head == 0) {
+        pmem_stats.alloc += 1;
+
+        if (tail <= PAGE_MASK) return;
+
+        head = PAGE_SIZE;
+        pages -= 1;
+    }
 
     if (alloc_tail < tail) {
         if (alloc_tail < head) {
