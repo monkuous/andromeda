@@ -11,6 +11,7 @@ kernel_elf = executable(
     'mem/memdetect.c',
     'mem/pmap.c',
     'mem/pmem.c',
+    'mem/vmem.c',
     'util/panic.c',
     'util/print.c',
     'util/string.c',

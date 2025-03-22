@@ -2,6 +2,7 @@
 #include "mem/layout.h"
 #include "mem/pmap.h"
 #include "mem/pmem.h"
+#include "mem/vmem.h"
 #include "string.h"
 #include "util/panic.h"
 #include <stddef.h>
@@ -170,7 +171,7 @@ uint32_t bootmem_alloc() {
         return alloc_head;
     }
 
-    panic("out of memory");
+    panic("bootmem: out of memory");
 }
 
 static void iter_usable_regions_aligned(void (*func)(uint64_t, uint64_t, void *), void *ctx) {
@@ -235,4 +236,11 @@ void bootmem_handover() {
     page_array = (page_t *)parr_vhead - page_base;
 
     iter_usable_regions_aligned(add_regions, nullptr);
+
+    // leave one page unmapped as a guard page
+    if (KERN_PHYS_BASE > PAGE_SIZE) {
+        vmem_add_range(KERN_VIRT_BASE, KERN_VIRT_BASE + KERN_PHYS_BASE - PAGE_SIZE - 1);
+    }
+
+    vmem_add_range(parr_vtail_aligned + 1, PTBL_VIRT_BASE - 1);
 }

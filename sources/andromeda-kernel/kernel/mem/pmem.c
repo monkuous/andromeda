@@ -19,7 +19,7 @@ uint32_t pmem_alloc_simple() {
 page_t *pmem_alloc(bool cache) {
     if (unlikely(!free_pages)) {
         // TODO: If there are currently cache pages allocated, wait until one's freed
-        panic("out of memory");
+        panic("pmem: out of memory");
     }
 
     page_t *page = free_pages;
