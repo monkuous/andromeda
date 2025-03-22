@@ -1,5 +1,6 @@
 #pragma once
 
+#include "util/panic.h"
 #include <stdint.h>
 
 typedef struct {
@@ -24,4 +25,11 @@ void intcall(uint8_t vector, regs_t *regs);
 static inline void rm_halt() {
     regs_t regs = {.eflags = 0x200};
     intcall(0xff, &regs);
+}
+
+static inline void lin_to_seg(uint32_t phys, uint16_t *seg, uint32_t *off) {
+    ASSERT(phys < 0x100000);
+
+    *seg = phys >> 4;
+    *off = phys & 15;
 }

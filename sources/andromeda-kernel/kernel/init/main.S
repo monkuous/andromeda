@@ -4,8 +4,6 @@
 .globl __kern_virt_base
 .set __kern_virt_base, KERN_VIRT_BASE
 
-#define PHYS(x) ((x) - KERN_VIRT_BASE)
-
 #define PDO(x) (((x) >> 20) & 0xffc)
 #define PTO(x) (((x) >> 10) & 0xffc)
 
@@ -40,7 +38,7 @@ _start:
     push %eax
     # enter protected mode
     call enable_a20
-    pushl $PHYS(kernel_gdt)
+    pushl $KERN_TO_PHYS(kernel_gdt)
     pushw $.Lgdt_lim
     lgdtl (%esp)
     add $6, %esp
@@ -58,15 +56,15 @@ _start:
     lldt %ax
 
     # clear bss
-    mov $PHYS(__bss_start), %edi
-    mov $PHYS(__bss_end + 3), %ecx # the +3 is to round up when dividing by 4 later
+    mov $KERN_TO_PHYS(__bss_start), %edi
+    mov $KERN_TO_PHYS(__bss_end + 3), %ecx # the +3 is to round up when dividing by 4 later
     sub %edi, %ecx
     shr $2, %ecx
     # eax is already 0
     rep stosl
 
     # build page directory
-    mov $PHYS(kernel_page_dir), %edi
+    mov $KERN_TO_PHYS(kernel_page_dir), %edi
     mov %edi, %cr3
     or $TABLE_FLAGS, %edi
     mov %edi, (PDO(PTBL_VIRT_BASE) - TABLE_FLAGS)(%edi)
@@ -80,7 +78,7 @@ _start:
     mov %eax, (-TABLE_FLAGS + ((KERN_PHYS_BASE >> 12) * 4))(%edi)
     add $0x1000, %eax
     add $4, %edi
-    cmp $PHYS(_end + WPAGE_FLAGS), %eax
+    cmp $KERN_TO_PHYS(_end + WPAGE_FLAGS), %eax
     jb .Lmap_single
 
     # enable paging
@@ -160,7 +158,7 @@ enable_a20:
     rep movsl
 
     # switch to the right page directory
-    mov $PHYS(kernel_page_dir), %ecx
+    mov $KERN_TO_PHYS(kernel_page_dir), %ecx
     mov %ecx, %cr3
 
     # set target vector and start using identity mappings
@@ -222,7 +220,7 @@ enable_a20:
     cli
     cld
     call enable_a20
-    mov $PHYS(kernel_page_dir), %eax
+    mov $KERN_TO_PHYS(kernel_page_dir), %eax
     mov %eax, %cr3
     lgdtl %cs:(gdt_desc)
     mov $0x80050033, %eax
