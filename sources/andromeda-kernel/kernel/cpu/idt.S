@@ -53,8 +53,8 @@ idt_thunks:
 idt_thunk_code:
 
 idt_thunk 0x00 # #DE: SIGFPE
-# 0x02 (NMI) is handled by a task gate
 idt_thunk 0x01 # #DB: SIGTRAP
+idt_thunk 0x02 # NMI
 idt_thunk 0x03 # #BP: SIGTRAP
 # 0x04 (#OF) is SIGSEGV via #GP
 # 0x05 (#BR) is SIGSEGV via #GP

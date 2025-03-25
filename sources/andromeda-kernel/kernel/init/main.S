@@ -297,7 +297,6 @@ kernel_gdt:
     .quad 0x0093000000ffff
     .quad 0 # kernel tss
     .quad 0 # df tss
-    .quad 0 # nmi tss
 .set .Lgdt_lim, . - kernel_gdt - 1
 .size kernel_gdt, . - kernel_gdt
 

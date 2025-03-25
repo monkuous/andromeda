@@ -73,7 +73,6 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
     switch (tss->prev) {
     case GDT_SEL_KTASK: prev = &kernel_tss; break;
     case GDT_SEL_DF_TASK: prev = &dfault_tss; break;
-    case GDT_SEL_NMI_TASK: prev = &nmi_tss; break;
     default: prev = nullptr; break;
     }
 
@@ -115,7 +114,6 @@ static void setup_task_exception(tss_t *tss, uint32_t vector, size_t stack_offse
 }
 
 void init_idt() {
-    setup_task_exception(&nmi_tss, 2, 4);
     setup_task_exception(&dfault_tss, 8, 0);
 
     for (size_t i = 0; i < sizeof(idt_thunks) / sizeof(*idt_thunks); i++) {
@@ -125,7 +123,6 @@ void init_idt() {
         idt[i] = create_irq_entry(thunk, 0);
     }
 
-    idt[2] = create_task_entry(GDT_SEL_NMI_TASK);
     idt[8] = create_task_entry(GDT_SEL_DF_TASK);
     idt[0x20] = create_irq_entry(idt_thunks[0x20], 3);
 }

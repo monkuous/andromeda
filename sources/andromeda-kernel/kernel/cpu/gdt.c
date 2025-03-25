@@ -12,10 +12,9 @@ extern struct {
     uint64_t bios_data;
     uint64_t kern_task;
     uint64_t df_task;
-    uint64_t nmi_task;
 } kernel_gdt;
 
-tss_t kernel_tss, dfault_tss, nmi_tss;
+tss_t kernel_tss, dfault_tss;
 
 static uint64_t create_tss_seg(tss_t *tss) {
     uintptr_t addr = (uintptr_t)tss;
@@ -36,7 +35,6 @@ static void setup_tss(uint64_t *segment, tss_t *tss) {
 void init_gdt() {
     setup_tss(&kernel_gdt.kern_task, &kernel_tss);
     setup_tss(&kernel_gdt.df_task, &dfault_tss);
-    setup_tss(&kernel_gdt.nmi_task, &nmi_tss);
 
     asm("ltr %w0" ::"r"(GDT_SEL_KTASK));
 }

@@ -8,7 +8,6 @@
 #define GDT_SEL_BDATA 0x30
 #define GDT_SEL_KTASK 0x38
 #define GDT_SEL_DF_TASK 0x40
-#define GDT_SEL_NMI_TASK 0x48
 
 #ifndef __ASSEMBLER__
 
@@ -44,7 +43,7 @@ typedef struct {
     uint16_t io_map_base;
 } tss_t;
 
-extern tss_t kernel_tss, dfault_tss, nmi_tss;
+extern tss_t kernel_tss, dfault_tss;
 
 void init_gdt();
 
