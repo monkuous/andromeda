@@ -8,6 +8,7 @@ kernel_elf = executable(
     'init/main.c',
     'init/main.S',
     'mem/bootmem.c',
+    'mem/kmalloc.c',
     'mem/memdetect.c',
     'mem/pmap.c',
     'mem/pmem.c',
