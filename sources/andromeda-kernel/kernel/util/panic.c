@@ -8,10 +8,11 @@
     va_start(args, format);
     printk("\nkernel panic: ");
     vprintk(format, args);
-    printk("\n");
+    printk("\npress any key to restart\n");
     va_end(args);
 
-    while (true) {
-        rm_halt();
-    }
+    regs_t regs = {};
+    intcall(0x16, &regs);
+    intcall(0x19, &regs);
+    __builtin_unreachable();
 }

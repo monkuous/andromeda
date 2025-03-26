@@ -187,6 +187,7 @@ enable_a20:
     mov %ax, %fs
     mov %ax, %gs
     mov %ax, %ss
+    sti
 
     # load registers
     popal
@@ -196,17 +197,10 @@ enable_a20:
     pop %gs
     popfl
 
-    cmpb $0xff, %cs:(.Lvector)
-    je .Lrm_halt
-
     # perform interrupt
     .byte 0xcd
 .Lvector:
     .byte 0x00
-    jmp .Lintcall_done
-.Lrm_halt:
-    hlt
-.Lintcall_done:
 
     # save registers
     pushfl

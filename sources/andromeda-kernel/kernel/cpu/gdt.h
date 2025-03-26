@@ -2,8 +2,8 @@
 
 #define GDT_SEL_KCODE 0x08
 #define GDT_SEL_KDATA 0x10
-#define GDT_SEL_UCODE 0x18
-#define GDT_SEL_UDATA 0x20
+#define GDT_SEL_UCODE 0x1b
+#define GDT_SEL_UDATA 0x23
 #define GDT_SEL_BCODE 0x28
 #define GDT_SEL_BDATA 0x30
 #define GDT_SEL_KTASK 0x38

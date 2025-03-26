@@ -13,6 +13,7 @@ kernel_elf = executable(
     'mem/pmap.c',
     'mem/pmem.c',
     'mem/vmem.c',
+    'proc/sched.c',
     'util/panic.c',
     'util/print.c',
     'util/string.c',

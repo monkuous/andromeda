@@ -1,6 +1,7 @@
 #include "idt.h"
 #include "asm/cr.h"
 #include "cpu/gdt.h"
+#include "proc/sched.h"
 #include "util/panic.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -128,6 +129,15 @@ void init_idt() {
 }
 
 idt_frame_t *idt_dispatch(idt_frame_t *frame) {
+    if (frame->cs & 3) {
+        current->regs = *frame;
+    }
+
     handle_fatal_exception(frame, frame->cs & 3);
+
+    if (frame->cs & 3) {
+        *frame = current->regs;
+    }
+
     return frame;
 }
