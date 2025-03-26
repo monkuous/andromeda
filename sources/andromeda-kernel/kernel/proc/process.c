@@ -256,6 +256,16 @@ pid_t pfork(thread_t *thread) {
     ent->process.parent = curp;
     list_insert_tail(&curp->children, &ent->process.pnode);
 
+    ent->process.euid = curp->euid;
+    ent->process.ruid = curp->ruid;
+    ent->process.suid = curp->suid;
+    ent->process.egid = curp->egid;
+    ent->process.rgid = curp->rgid;
+    ent->process.sgid = curp->sgid;
+
+    memcpy(ent->process.groups, curp->groups, sizeof(curp->groups));
+    ent->process.ngroups = curp->ngroups;
+
     thread->process = &ent->process;
     list_remove(&curp->threads, &thread->pnode);
     list_insert_tail(&ent->process.threads, &thread->pnode);
@@ -455,4 +465,185 @@ void remove_thread_from_process(thread_t *thread) {
     if (list_is_empty(&proc->threads)) {
         make_zombie(proc);
     }
+}
+
+gid_t getegid() {
+    return current->process->egid;
+}
+
+uid_t geteuid() {
+    return current->process->euid;
+}
+
+gid_t getgid() {
+    return current->process->rgid;
+}
+
+int getgroups(int gidsetsize, gid_t grouplist[]) {
+    process_t *p = current->process;
+
+    if (gidsetsize == 0) return p->ngroups;
+    if (gidsetsize < p->ngroups) return EINVAL;
+
+    memcpy(grouplist, p->groups, p->ngroups * sizeof(*p->groups));
+    return p->ngroups;
+}
+
+int getresgid(gid_t *restrict rgid, gid_t *restrict egid, gid_t *restrict sgid) {
+    process_t *p = current->process;
+    *rgid = p->rgid;
+    *egid = p->egid;
+    *sgid = p->sgid;
+    return 0;
+}
+
+int getresuid(uid_t *restrict ruid, uid_t *restrict euid, uid_t *restrict suid) {
+    process_t *p = current->process;
+    *ruid = p->ruid;
+    *euid = p->euid;
+    *suid = p->suid;
+    return 0;
+}
+
+uid_t getuid() {
+    return current->process->ruid;
+}
+
+int setegid(gid_t egid) {
+    if (egid == (gid_t)-1) return EINVAL;
+
+    process_t *p = current->process;
+    if (p->euid != 0 && egid != p->rgid && egid != p->sgid) return EPERM;
+    p->egid = egid;
+    return 0;
+}
+
+int seteuid(uid_t euid) {
+    if (euid == (uid_t)-1) return EINVAL;
+
+    process_t *p = current->process;
+    if (p->euid != 0 && euid != p->ruid && euid != p->suid) return EPERM;
+    p->euid = euid;
+    return 0;
+}
+
+int setgroups(size_t size, const gid_t list[]) {
+    process_t *p = current->process;
+    if (p->euid != 0) return EPERM;
+
+    if (size > sizeof(p->groups) / sizeof(*p->groups)) return EINVAL;
+
+    memcpy(p->groups, list, size * sizeof(*p->groups));
+    p->ngroups = size;
+
+    return 0;
+}
+
+int setregid(gid_t rgid, gid_t egid) {
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (rgid != (gid_t)-1 && rgid != p->sgid) return EPERM;
+        if (egid != (gid_t)-1 && egid != p->rgid && egid != p->sgid) return EPERM;
+    }
+
+    if (rgid != (gid_t)-1) p->rgid = rgid;
+    if (egid != (gid_t)-1) p->egid = egid;
+
+    if (rgid != (gid_t)-1 || (egid != (gid_t)-1 && egid != p->rgid)) p->sgid = p->egid;
+    return 0;
+}
+
+int setreuid(uid_t ruid, uid_t euid) {
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (ruid != (uid_t)-1 && ruid != p->suid) return EPERM;
+        if (euid != (uid_t)-1 && euid != p->ruid && euid != p->suid) return EPERM;
+    }
+
+    if (ruid != (uid_t)-1) p->ruid = ruid;
+    if (euid != (uid_t)-1) p->euid = euid;
+
+    if (ruid != (uid_t)-1 || (euid != (uid_t)-1 && euid != p->ruid)) p->suid = p->euid;
+    return 0;
+}
+
+int setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (rgid != (gid_t)-1 && rgid != p->rgid && rgid != p->egid && rgid != p->sgid) return EPERM;
+        if (egid != (gid_t)-1 && egid != p->rgid && egid != p->egid && egid != p->sgid) return EPERM;
+        if (sgid != (gid_t)-1 && sgid != p->rgid && sgid != p->egid && sgid != p->sgid) return EPERM;
+    }
+
+    if (rgid != (gid_t)-1) p->rgid = rgid;
+    if (egid != (gid_t)-1) p->egid = egid;
+    if (sgid != (gid_t)-1) p->sgid = sgid;
+
+    return 0;
+}
+
+int setresuid(uid_t ruid, uid_t euid, uid_t suid) {
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (ruid != (uid_t)-1 && ruid != p->ruid && ruid != p->euid && ruid != p->suid) return EPERM;
+        if (euid != (uid_t)-1 && euid != p->ruid && euid != p->euid && euid != p->suid) return EPERM;
+        if (suid != (uid_t)-1 && suid != p->ruid && suid != p->euid && suid != p->suid) return EPERM;
+    }
+
+    if (ruid != (uid_t)-1) p->ruid = ruid;
+    if (euid != (uid_t)-1) p->euid = euid;
+    if (suid != (uid_t)-1) p->suid = suid;
+
+    return 0;
+}
+
+int setgid(gid_t gid) {
+    if (gid == (gid_t)-1) return EINVAL;
+
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (gid != p->rgid && gid != p->sgid) return EPERM;
+        p->egid = gid;
+    } else {
+        p->rgid = gid;
+        p->egid = gid;
+        p->sgid = gid;
+    }
+
+    return 0;
+}
+
+int setuid(uid_t uid) {
+    if (uid == (uid_t)-1) return EINVAL;
+
+    process_t *p = current->process;
+
+    if (p->euid != 0) {
+        if (uid != p->ruid && uid != p->suid) return EPERM;
+        p->euid = uid;
+    } else {
+        p->ruid = uid;
+        p->euid = uid;
+        p->suid = uid;
+    }
+
+    return 0;
+}
+
+relation_t get_relation(uid_t uid, gid_t gid) {
+    process_t *p = current->process;
+
+    if (uid == p->euid) return REL_OWNER;
+    if (gid == p->egid) return REL_GROUP;
+
+    for (int i = 0; i < p->ngroups; i++) {
+        if (p->groups[i] == gid) return REL_GROUP;
+    }
+
+    return REL_OTHER;
 }

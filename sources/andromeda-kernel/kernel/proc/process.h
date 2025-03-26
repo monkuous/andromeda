@@ -10,6 +10,12 @@ typedef struct procent procent_t;
 typedef struct process process_t;
 typedef struct session session_t;
 
+typedef enum {
+    REL_OWNER,
+    REL_GROUP,
+    REL_OTHER,
+} relation_t;
+
 struct process {
     prgroup_t *group;
     list_node_t gnode;
@@ -19,6 +25,16 @@ struct process {
 
     list_t children;
     list_t threads;
+
+    uid_t euid;
+    uid_t ruid;
+    uid_t suid;
+    gid_t egid;
+    gid_t rgid;
+    gid_t sgid;
+
+    gid_t groups[32];
+    int ngroups;
 
     list_t waiting;    // list of active pwait calls
     list_t wait_avail; // list of children with wait info available
@@ -63,6 +79,26 @@ pid_t getsid(pid_t pid);
 
 int setpgid(pid_t pid, pid_t pgid);
 pid_t setsid();
+
+gid_t getegid();
+uid_t geteuid();
+gid_t getgid();
+int getgroups(int gidsetsize, gid_t grouplist[]);
+int getresgid(gid_t *restrict rgid, gid_t *restrict egid, gid_t *restrict sgid);
+int getresuid(uid_t *restrict ruid, uid_t *restrict euid, uid_t *restrict suid);
+uid_t getuid();
+
+int setegid(gid_t egid);
+int seteuid(uid_t euid);
+int setgroups(size_t size, const gid_t list[]);
+int setregid(gid_t rgid, gid_t egid);
+int setreuid(uid_t ruid, uid_t euid);
+int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
+int setresuid(uid_t ruid, uid_t euid, uid_t suid);
+int setgid(gid_t gid);
+int setuid(uid_t uid);
+
+relation_t get_relation(uid_t uid, gid_t gid);
 
 // forks the current process and makes the given thread join the new process
 // the thread must belong to the current process, and must be in THREAD_CREATED

@@ -5,6 +5,8 @@ kernel_elf = executable(
     'cpu/gdt.c',
     'cpu/idt.c',
     'cpu/idt.S',
+    'drv/idle.c',
+    'fs/vfs.c',
     'init/main.c',
     'init/main.S',
     'mem/bootmem.c',
