@@ -61,7 +61,7 @@ void pmap_unmap(uintptr_t virt, size_t size) {
 
     uintptr_t tail = virt + (size - 1);
     ASSERT(virt < tail);
-    ASSERT(virt < KERN_VIRT_BASE == tail < KERN_VIRT_BASE);
+    ASSERT((virt < KERN_VIRT_BASE) == (tail < KERN_VIRT_BASE));
     ASSERT(tail < PTBL_VIRT_BASE);
 
     uint32_t pdi = (virt >> 22) & 1023;
