@@ -18,8 +18,15 @@
 
 extern uint32_t kernel_page_dir[1024];
 
+static uint32_t *temp_map_pte;
+alignas(PAGE_SIZE) static char temp_map_page[PAGE_SIZE];
+
 static inline void invlpg(uintptr_t addr) {
     asm("invlpg (%0)" ::"r"(addr) : "memory");
+}
+
+void init_pmap() {
+    temp_map_pte = (uint32_t *)(PTBL_VIRT_BASE | ((uintptr_t)temp_map_page >> 10));
 }
 
 void pmap_alloc(uintptr_t virt, size_t size, uint32_t flags) {
@@ -99,4 +106,15 @@ void pmap_unmap(uintptr_t virt, size_t size) {
         pdi++;
         pti = 0;
     }
+}
+
+void *pmap_tmpmap(page_t *page) {
+    uint32_t pte = page_to_phys(page) | PTE_DIRTY | PTE_ACCESSED | PTE_WRITABLE | PTE_PRESENT;
+
+    if (pte != *temp_map_pte) {
+        *temp_map_pte = pte;
+        invlpg((uintptr_t)temp_map_page);
+    }
+
+    return temp_map_page;
 }
