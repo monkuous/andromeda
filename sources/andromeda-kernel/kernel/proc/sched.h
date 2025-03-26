@@ -6,8 +6,6 @@
 
 typedef void (*thread_cont_t)(void *ctx);
 
-typedef struct thread thread_t;
-
 typedef enum {
     THREAD_CREATED,
     THREAD_RUNNING,
@@ -21,7 +19,7 @@ typedef enum {
     WAKE_INTERRUPT,
 } wake_reason_t;
 
-struct thread {
+typedef struct {
     size_t references;
     list_node_t node;
     thread_state_t state;
@@ -31,7 +29,7 @@ struct thread {
         void *ctx;
     } continuation;
     wake_reason_t wake_reason;
-};
+} thread_t;
 
 extern thread_t *current;
 

@@ -128,7 +128,7 @@ void init_idt() {
     idt[0x20] = create_irq_entry(idt_thunks[0x20], 3);
 }
 
-idt_frame_t *idt_dispatch(idt_frame_t *frame) {
+[[gnu::used]] idt_frame_t *idt_dispatch(idt_frame_t *frame) {
     if (frame->cs & 3) {
         current->regs = *frame;
     }

@@ -134,42 +134,8 @@ enable_a20:
     .word 0
 .size enable_a20, . - enable_a20
 
-.globl intcall
-.type intcall, @function
-.set intcall, .Lintcall + KERN_VIRT_BASE
-.Lintcall:
-.code32
-    pushfl
-    push %ebx
-    push %esi
-    push %edi
-    push %ebp
-
-    # save current page directory
-    mov %cr3, %ecx
-    push %edx
-    push %ecx
-
-    # copy registers to stack
-    mov $11, %ecx
-    sub $44, %esp
-    mov %edx, %esi
-    mov %esp, %edi
-    rep movsl
-
-    # switch to the right page directory
-    mov $KERN_TO_PHYS(kernel_page_dir), %ecx
-    mov %ecx, %cr3
-
-    # set target vector and start using identity mappings
-    mov %al, (.Lvector)
-    mov $1f, %eax
-    jmp *%eax
-1:  sub $KERN_VIRT_BASE, %esp
-
-    # exit protected mode
-    ljmp $GDT_SEL_BCODE, $1f
-.code16
+.type do_intcall, @function
+do_intcall:
 1:  mov $GDT_SEL_BDATA, %ax
     mov %ax, %ds
     mov %ax, %es
@@ -219,9 +185,57 @@ enable_a20:
     lgdtl %cs:(gdt_desc)
     mov $0x80050033, %eax
     mov %eax, %cr0
-    ljmp $GDT_SEL_KCODE, $1f
+    ljmpl $GDT_SEL_KCODE, $.Lintcall_ret
+.size do_intcall, . - do_intcall
+
+.balign 2
+.type gdt_desc, @object
+gdt_desc:
+    .word .Lgdt_lim
+    .long kernel_gdt
+.size gdt_desc, . - gdt_desc
+
+.balign 2
+.type bios_idt_desc, @object
+bios_idt_desc:
+    .word 0x3ff
+    .long 0
+.size bios_idt_desc, . - bios_idt_desc
+
 .code32
-1:  mov $GDT_SEL_KDATA, %eax
+.text
+
+.globl intcall
+.type intcall, @function
+intcall:
+    pushfl
+    push %ebx
+    push %esi
+    push %edi
+    push %ebp
+
+    # save current page directory
+    mov %cr3, %ecx
+    push %edx
+    push %ecx
+
+    # copy registers to stack
+    mov $11, %ecx
+    sub $44, %esp
+    mov %edx, %esi
+    mov %esp, %edi
+    rep movsl
+
+    # switch to the right page directory
+    mov $KERN_TO_PHYS(kernel_page_dir), %ecx
+    mov %ecx, %cr3
+
+    # set target vector, start using identity mappings, and exit protected mode
+    mov %al, (.Lvector)
+    sub $KERN_VIRT_BASE, %esp
+    ljmp $GDT_SEL_BCODE, $do_intcall
+.Lintcall_ret:
+    mov $GDT_SEL_KDATA, %eax
     mov %eax, %ds
     mov %eax, %es
     mov %eax, %fs
@@ -237,9 +251,7 @@ enable_a20:
     ltr %ax
 
     # start using virtual mappings again
-    mov $(1f + KERN_VIRT_BASE), %eax
-    jmp *%eax
-1:  add $KERN_VIRT_BASE, %esp
+    add $KERN_VIRT_BASE, %esp
 
     # switch back to the original page tables
     mov 44(%esp), %eax
@@ -259,22 +271,7 @@ enable_a20:
     pop %ebx
     popfl
     ret
-.code16
-.size intcall, . - .Lintcall
-
-.balign 2
-.type gdt_desc, @object
-gdt_desc:
-    .word .Lgdt_lim
-    .long kernel_gdt
-.size gdt_desc, . - gdt_desc
-
-.balign 2
-.type bios_idt_desc, @object
-bios_idt_desc:
-    .word 0x3ff
-    .long 0
-.size bios_idt_desc, . - bios_idt_desc
+.size intcall, . - intcall
 
 .data
 
