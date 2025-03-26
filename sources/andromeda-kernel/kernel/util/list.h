@@ -13,7 +13,7 @@ typedef struct {
 } list_t;
 
 #define list_foreach(list, type, member, name)                                                                         \
-    for (type *name = container(type, member, (list)->first); name != nullptr;                                         \
+    for (type *name = container(type, member, (list).first); name != nullptr;                                          \
          name = container(type, member, name->member.next))
 
 static inline bool list_is_empty(list_t *list) {

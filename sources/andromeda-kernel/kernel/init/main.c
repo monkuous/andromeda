@@ -3,6 +3,7 @@
 #include "init/bios.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
+#include "proc/process.h"
 #include "util/panic.h"
 #include "util/print.h"
 #include <stdint.h>
@@ -25,6 +26,7 @@ static void init_video() {
     printk("\nStarting Andromeda...\n");
     detect_memory();
     bootmem_handover();
+    init_proc();
 
     panic("TODO");
 }

@@ -2,6 +2,7 @@
 #include "cpu/gdt.h"
 #include "drv/idle.h"
 #include "mem/vmalloc.h"
+#include "proc/process.h"
 #include "string.h"
 #include "util/container.h"
 #include "util/list.h"
@@ -9,6 +10,7 @@
 
 static thread_t init_thread = {
         .state = THREAD_RUNNING,
+        .process = &init_process,
 };
 static list_t thread_queue;
 
@@ -19,6 +21,7 @@ static thread_t *pop_thread() {
 }
 
 static void handle_exit(thread_t *thread) {
+    remove_thread_from_process(thread);
     thread_deref(thread);
 }
 
@@ -103,6 +106,8 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
     thread->state = THREAD_CREATED;
     thread->continuation.func = cont;
     thread->continuation.ctx = ctx;
+    thread->process = current->process;
+    list_insert_tail(&current->process->threads, &thread->pnode);
 
     thread->regs.cs = GDT_SEL_UCODE;
     thread->regs.ds = GDT_SEL_UDATA;
@@ -120,6 +125,10 @@ void thread_ref(thread_t *thread) {
 
 void thread_deref(thread_t *thread) {
     if (--thread->references == 0) {
+        if (thread->state == THREAD_CREATED) {
+            remove_thread_from_process(thread);
+        }
+
         vmfree(thread, sizeof(*thread));
     }
 }

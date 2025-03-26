@@ -2,6 +2,7 @@
 #include "mem/pmap.h"
 #include "mem/pmem.h"
 #include "string.h"
+#include "util/hash.h"
 #include "util/panic.h"
 #include <stdint.h>
 
@@ -202,15 +203,6 @@ void vmem_add_range(uintptr_t head, uintptr_t tail) {
     merge_or_insert(prev, next, head, size);
 }
 
-static uint32_t make_hash(uint32_t x) {
-    x ^= x >> 16;
-    x *= 0x7feb352d;
-    x ^= x >> 15;
-    x *= 0x846ca68b;
-    x ^= x >> 16;
-    return x;
-}
-
 uintptr_t vmem_alloc(size_t size) {
     ASSERT((size & PAGE_MASK) == 0);
     int wanted_order = get_higher_p2(size);
@@ -255,7 +247,7 @@ uintptr_t vmem_alloc(size_t size) {
         free_remove(range, order);
     }
 
-    kind_insert(alloc, &allocations[make_hash(alloc->start) & ALLOC_TABLE_MASK]);
+    kind_insert(alloc, &allocations[make_hash_int32(alloc->start) & ALLOC_TABLE_MASK]);
     return alloc->start;
 }
 
@@ -278,7 +270,7 @@ void vmem_free(uintptr_t addr, size_t size) {
     ASSERT((addr & PAGE_MASK) == 0);
     ASSERT((size & PAGE_MASK) == 0);
 
-    uint64_t hash = make_hash(addr);
+    uint64_t hash = make_hash_int32(addr);
     struct vmem_range *range = get_range_from_alloc(hash, addr, size);
     kind_remove(range, &allocations[hash & ALLOC_TABLE_MASK]);
 

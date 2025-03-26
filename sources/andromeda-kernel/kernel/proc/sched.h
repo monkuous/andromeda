@@ -29,6 +29,8 @@ typedef struct {
         void *ctx;
     } continuation;
     wake_reason_t wake_reason;
+    struct process *process;
+    list_node_t pnode;
 } thread_t;
 
 extern thread_t *current;
