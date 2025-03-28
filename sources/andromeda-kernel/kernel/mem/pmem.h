@@ -1,5 +1,6 @@
 #pragma once
 
+#include "util/list.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,7 +13,12 @@ typedef union page {
         union page *next;
         size_t count;
     } free;
-} page_t;
+    struct {
+        list_node_t lru_node;
+        struct pgcache *cache;
+        uint64_t index;
+    } cache;
+} __attribute__((aligned(32))) page_t;
 
 typedef struct {
     uint32_t total;

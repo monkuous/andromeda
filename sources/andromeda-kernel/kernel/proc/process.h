@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fs/vfs.h"
+#include "klimits.h"
 #include "proc/sched.h"
 #include "util/list.h"
 #include <signal.h> /* IWYU pragma: keep */
@@ -33,8 +35,11 @@ struct process {
     gid_t rgid;
     gid_t sgid;
 
-    gid_t groups[32];
+    gid_t groups[NGROUPS_MAX];
     int ngroups;
+
+    file_t *cwd;
+    mode_t umask;
 
     list_t waiting;    // list of active pwait calls
     list_t wait_avail; // list of children with wait info available

@@ -1,5 +1,6 @@
 #include "pmem.h"
 #include "compiler.h"
+#include "fs/pgcache.h"
 #include "mem/bootmem.h"
 #include "mem/layout.h"
 #include "util/panic.h"
@@ -18,8 +19,15 @@ uint32_t pmem_alloc_simple() {
 
 page_t *pmem_alloc(bool cache) {
     if (unlikely(!free_pages)) {
-        // TODO: If there are currently cache pages allocated, wait until one's freed
-        panic("pmem: out of memory");
+        page_t *page = pgcache_evict();
+        if (unlikely(!page)) panic("pmem: out of memory");
+
+        if (!cache) {
+            pmem_stats.cache -= 1;
+            pmem_stats.alloc += 1;
+        }
+
+        return page;
     }
 
     page_t *page = free_pages;
