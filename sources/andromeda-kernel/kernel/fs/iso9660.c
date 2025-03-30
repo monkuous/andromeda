@@ -238,10 +238,17 @@ static uint64_t fblock_to_lba(iso9660_inode_t *inode, uint64_t fblock) {
     return fblock + cur->block;
 }
 
+static void make_extent(iso9660_fs_t *fs, extent_t *ext, dirent_t *entry) {
+    if (entry->file_unit_size) panic("iso9660: interleaved files are not supported");
+
+    ext->block = entry->extent_lba.le;
+    ext->count = (entry->extent_len.le + (fs->base.block_size - 1)) >> fs->block_shift;
+}
+
 static int get_extent_list(
         iso9660_fs_t *fs,
         iso9660_inode_t *dir,
-        full_dirent_t *entry,
+        dirent_t entry, // passed by value to prevent read values from leaking back into the main dirent
         uint64_t offset,
         extent_t **aout,
         size_t *lout
@@ -257,14 +264,13 @@ static int get_extent_list(
         vmfree(extents, old_size);
         extents = new_list;
 
-        extents[count].block = entry->common.extent_lba.le;
-        extents[count].count = (entry->common.extent_len.le + (fs->base.block_size - 1)) >> fs->block_shift;
+        make_extent(fs, &extents[count], &entry);
         count++;
 
-        if (!(entry->common.flags & DENT_MID_EXTENT)) break;
+        if (!(entry.flags & DENT_MID_EXTENT)) break;
 
-        offset += entry->common.length;
-        int error = pgcache_read(&dir->base.data, entry, sizeof(*entry), offset);
+        offset += entry.length;
+        int error = pgcache_read(&dir->base.data, &entry, sizeof(entry), offset);
         if (unlikely(error)) {
             vmfree(extents, new_size);
             return error;
@@ -312,7 +318,7 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
             if (len == entry->name.length && !memcmp(cur.common.name, entry->name.data, len)) {
                 extent_t *extents;
                 size_t ext_count;
-                error = get_extent_list(fs, self, &cur, offset, &extents, &ext_count);
+                error = get_extent_list(fs, self, cur.common, offset, &extents, &ext_count);
                 if (unlikely(error)) return error;
 
                 return create_inode(
@@ -460,8 +466,7 @@ int iso9660_create(fs_t **out, void *ctx) {
     fs->block_shift = __builtin_ctz(fs->base.block_size);
 
     extent_t *extents = vmalloc(sizeof(*extents));
-    extents[0].block = primdesc->primary.root_dirent.extent_lba.le;
-    extents[0].count = (primdesc->primary.root_dirent.extent_len.le + (fs->base.block_size - 1)) >> fs->block_shift;
+    make_extent(fs, extents, &primdesc->primary.root_dirent);
 
     inode_t *root;
     error = create_inode(&root, fs, &primdesc->primary.root_dirent, 0, extents, 1);
