@@ -510,24 +510,20 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
 
         if (length == 2 && path[0] == '.' && path[1] == '.') {
             dentry_t *cur = rel;
-            dentry_ref(cur);
 
-            while (!cur->parent) {
-                dentry_t *mountpoint = cur->filesystem->mountpoint;
-                if (!mountpoint) break;
-                dentry_ref(mountpoint);
-                dentry_deref(cur);
-                cur = mountpoint;
-            }
+            for (;;) {
+                if (cur == current->process->root->path) break;
 
-            if (cur->parent && cur->parent != current->process->root->path) {
+                if (!cur->parent) {
+                    cur = cur->filesystem->mountpoint;
+                    continue;
+                }
+
+                dentry_t *par = cur->parent;
+                dentry_ref(par);
                 dentry_deref(rel);
-                rel = cur->parent;
-                dentry_ref(rel);
-                dentry_deref(cur);
-            } else {
-                // We're at /, so .. == .
-                dentry_deref(cur);
+                rel = par;
+                break;
             }
 
             was_dot = true;
@@ -1078,7 +1074,7 @@ int vfs_chdir(file_t *file) {
     file_t *old = current->process->cwd;
     file_ref(file);
     current->process->cwd = file;
-    if (old) file_deref(old);
+    file_deref(old);
 
     return 0;
 }
@@ -1087,8 +1083,11 @@ int vfs_chroot(file_t *file) {
     if (current->process->euid) return EPERM;
     if (unlikely(!file->path || !S_ISDIR(file->inode->mode))) return ENOTDIR;
 
-    file_deref(current->process->cwd);
-    if (current->process->root) file_deref(current->process->root);
+    if (current->process->root) {
+        file_deref(current->process->cwd);
+        file_deref(current->process->root);
+    }
+
     current->process->cwd = file;
     current->process->root = file;
     file_ref(file);
@@ -1326,4 +1325,42 @@ ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset) {
 
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset) {
     return do_rw_op(file, (void *)buffer, size, W_OK, file->ops->write, offset, false);
+}
+
+static size_t format_path(unsigned char *buffer, size_t length, dentry_t *entry) {
+    size_t tot = 0;
+
+    while (entry) {
+        if (entry == current->process->root->path) break;
+
+        if (!entry->parent) {
+            entry = entry->filesystem->mountpoint;
+            continue;
+        }
+
+        if (length > entry->name.length) {
+            length -= entry->name.length;
+            memcpy(&buffer[length], entry->name.data, entry->name.length);
+            buffer[--length] = '/';
+        }
+
+        tot += entry->name.length + 1;
+        entry = entry->parent;
+    }
+
+    if (!tot) {
+        if (length) buffer[--length] = '/';
+        tot++;
+    }
+
+    ASSERT(length == 0);
+    return tot;
+}
+
+size_t vfs_alloc_path(void **out, dentry_t *entry) {
+    size_t length = format_path(nullptr, 0, entry);
+    void *buf = vmalloc(length);
+    format_path(buf, length, entry);
+    *out = buf;
+    return length;
 }

@@ -177,3 +177,5 @@ ssize_t vfs_read(file_t *file, void *buffer, ssize_t size);
 ssize_t vfs_write(file_t *file, const void *buffer, ssize_t size);
 ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset);
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset);
+
+size_t vfs_alloc_path(void **out, dentry_t *entry);

@@ -40,7 +40,7 @@ static void init_vfs() {
     file_t *root;
     error = vfs_open(&root, nullptr, "/", 1, O_DIRECTORY, 0);
     if (unlikely(error)) panic("failed to open root (%d)", error);
-    error = vfs_chdir(root);
+    error = vfs_chroot(root);
     if (unlikely(error)) panic("failed to set working directory (%d)", error);
     file_deref(root);
 

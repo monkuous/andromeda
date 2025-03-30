@@ -10,11 +10,14 @@
 #include "util/container.h"
 #include "util/panic.h"
 #include "util/time.h"
+#include <bits/posix/stat.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/statvfs.h>
 #include <time.h>
+
+#define INO_BASE 0
 
 static const file_ops_t iso9660_dir_ops;
 static const inode_ops_t iso9660_inode_ops;
@@ -23,6 +26,8 @@ typedef struct {
     fs_t base;
     bdev_t *device;
     int block_shift;
+    uint8_t rr_skip;
+    bool need_px;
 } iso9660_fs_t;
 
 typedef struct {
@@ -30,7 +35,7 @@ typedef struct {
     uint32_t count;
 } extent_t;
 
-typedef struct {
+typedef struct isoino {
     inode_t base;
     extent_t *extents;
     size_t num_extents;
@@ -162,21 +167,378 @@ static struct timespec create_timespec(datetime_t *time) {
     return spec;
 }
 
-static int dirino_init(iso9660_fs_t *, iso9660_inode_t *inode) {
+static unsigned parse_field(uint8_t *data, size_t len) {
+    unsigned value = 0;
+
+    while (len--) {
+        value = (value * 10) + (*data++ - '0');
+    }
+
+    return value;
+}
+
+static struct timespec create_timespec_long(dec_datetime_t *time) {
+    unsigned year = parse_field(time->year, sizeof(time->year));
+    unsigned month = parse_field(time->month, sizeof(time->month));
+    unsigned day = parse_field(time->day, sizeof(time->day));
+    unsigned hour = parse_field(time->hour, sizeof(time->hour));
+    unsigned minute = parse_field(time->minute, sizeof(time->minute));
+    unsigned second = parse_field(time->second, sizeof(time->second));
+    unsigned centisecond = parse_field(time->centisecond, sizeof(time->centisecond));
+
+    struct timespec spec;
+    spec.tv_sec = get_time_from_date(year, month, day);
+    spec.tv_sec += hour * 3600;
+    spec.tv_sec += minute * 60;
+    spec.tv_sec += second;
+    spec.tv_nsec = centisecond * 10000000; // 1 cs = 10,000,000 ns
+    spec.tv_sec -= time->timezone * 15 * 60;
+    return spec;
+}
+
+struct rr_info {
+    bool have_cl : 1;
+    bool have_px : 1;
+    bool have_rn : 1;
+    bool have_tf_creation : 1;
+    bool have_tf_modify : 1;
+    bool have_tf_access : 1;
+    bool have_tf_attributes : 1;
+    bool have_tf_backup : 1;
+    bool have_tf_expiration : 1;
+    bool have_tf_effective : 1;
+    struct {
+        uint32_t lba;
+    } cl;
+    struct {
+        uint32_t mode;
+        uint32_t nlink;
+        uint32_t uid;
+        uint32_t gid;
+        uint32_t ino;
+    } px;
+    struct {
+        uint64_t dev;
+    } pn;
+    struct {
+        void *target;
+        size_t length;
+    } sl;
+    struct {
+        void *data;
+        size_t length;
+    } nm;
+    struct {
+        struct timespec creation;
+        struct timespec modify;
+        struct timespec access;
+        struct timespec attributes;
+        struct timespec backup;
+        struct timespec expiration;
+        struct timespec effective;
+    } tf;
+};
+
+typedef struct [[gnu::packed]] {
+    uint16_t sig;
+    uint8_t length;
+    uint8_t version;
+    union {
+        struct [[gnu::packed]] {
+            uint32_lb_t location;
+            uint32_lb_t offset;
+            uint32_lb_t length;
+        } ce;
+        struct [[gnu::packed]] {
+            uint32_lb_t location;
+        } cl;
+        struct [[gnu::packed]] {
+            uint8_t flags;
+            uint8_t data[];
+        } nm;
+        struct [[gnu::packed]] {
+            uint32_lb_t mode;
+            uint32_lb_t nlink;
+            uint32_lb_t uid;
+            uint32_lb_t gid;
+            uint32_lb_t ino;
+        } px;
+        struct [[gnu::packed]] {
+            uint32_lb_t high;
+            uint32_lb_t low;
+        } pn;
+        struct [[gnu::packed]] {
+            uint8_t flags;
+            uint8_t components[];
+        } sl;
+        struct [[gnu::packed]] {
+            uint16_t check;
+            uint8_t skip;
+        } sp;
+        struct [[gnu::packed]] {
+            uint8_t flags;
+            union {
+                datetime_t sform[0];
+                dec_datetime_t lform[0];
+            };
+        } tf;
+    };
+} susp_field_t;
+
+#define SUSP_CE 0x4543 /* "CE" */
+#define SUSP_CL 0x4c43 /* "CL" */
+#define SUSP_NM 0x4d4e /* "NM" */
+#define SUSP_PN 0x4e50 /* "PN" */
+#define SUSP_PX 0x5850 /* "PX" */
+#define SUSP_RE 0x4552 /* "RE" */
+#define SUSP_SL 0x4c53 /* "SL" */
+#define SUSP_SP 0x5053 /* "SP" */
+#define SUSP_ST 0x5453 /* "ST" */
+#define SUSP_TF 0x4654 /* "TF" */
+
+typedef struct [[gnu::packed]] {
+    uint8_t flags;
+    uint8_t length;
+    uint8_t data[];
+} susp_sl_component_t;
+
+#define SUSP_NM_CONTINUE 1
+#define SUSP_NM_CURRENT 2
+#define SUSP_NM_HOSTNAME 32
+
+#define SUSP_SL_CONTINUE 1
+#define SUSP_SL_CURRENT 2
+#define SUSP_SL_PARENT 4
+#define SUSP_SL_ROOT 8
+#define SUSP_SL_MOUNT 16
+#define SUSP_SL_HOSTNAME 32
+
+#define SUSP_TF_CREATION 1
+#define SUSP_TF_MODIFY 2
+#define SUSP_TF_ACCESS 4
+#define SUSP_TF_ATTRIBUTES 8
+#define SUSP_TF_BACKUP 16
+#define SUSP_TF_EXPIRATION 32
+#define SUSP_TF_EFFECTIVE 64
+#define SUSP_TF_LONG_FORM 128
+
+static size_t get_susp_off(uint8_t name_len, uint8_t skip) {
+    return ((offsetof(full_dirent_t, common.name) + name_len + 1) & ~1) + skip;
+}
+
+static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *out) {
+    if (fs->rr_skip == 0xff) return 0;
+
+    size_t su_offs = get_susp_off(entry->common.name_length, fs->rr_skip);
+    if (su_offs >= entry->common.length) return 0;
+
+    susp_field_t *cur_su = (void *)entry + su_offs;
+    size_t su_size = entry->common.length - su_offs;
+
+    void *alloc_area = nullptr;
+    size_t alloc_size = 0;
+
+    bool sl_was_continue = false;
+
+    for (;;) {
+        susp_field_t *ce_field = nullptr;
+
+        while (su_size >= 4) {
+            if (su_size < cur_su->length) break;
+
+            switch (cur_su->sig) {
+            case SUSP_CE: ce_field = cur_su; break;
+            case SUSP_CL:
+                out->have_cl = true;
+                out->cl.lba = cur_su->cl.location.le;
+                break;
+            case SUSP_PN: out->pn.dev = ((uint64_t)cur_su->pn.high.le << 32) | cur_su->pn.low.le; break;
+            case SUSP_PX:
+                out->have_px = true;
+                out->px.mode = cur_su->px.mode.le;
+                out->px.nlink = cur_su->px.nlink.le;
+                out->px.uid = cur_su->px.uid.le;
+                out->px.gid = cur_su->px.gid.le;
+                out->px.ino = cur_su->px.ino.le;
+                break;
+            case SUSP_RE: out->have_rn = true; break;
+            case SUSP_NM: {
+                void *cdata = cur_su->nm.data;
+                size_t clen = cur_su->length - offsetof(susp_field_t, nm.data);
+
+                if (cur_su->nm.flags & SUSP_NM_CURRENT) {
+                    cdata = ".";
+                    clen = 1;
+                } else if (cur_su->nm.flags & SUSP_NM_HOSTNAME) {
+                    // TODO: Actually get the hostname properly
+                    cdata = "<hostname>";
+                    clen = 10;
+                }
+
+                size_t tlen = clen + out->nm.length;
+                void *buffer = vmalloc(tlen);
+                memcpy(buffer, out->nm.data, out->nm.length);
+                memcpy(buffer + out->nm.length, cdata, clen);
+                vmfree(out->nm.data, out->nm.length);
+                out->nm.data = buffer;
+                out->nm.length = tlen;
+                break;
+            }
+            case SUSP_SL: {
+                size_t offset = 0;
+                size_t area_len = cur_su->length - offsetof(susp_field_t, sl.components);
+
+                while (area_len >= 2) {
+                    susp_sl_component_t *component = (void *)cur_su->sl.components + offset;
+                    if (component->length > area_len) break;
+
+                    void *cdata = component->data;
+                    size_t clen = component->length;
+
+                    if (component->flags & SUSP_SL_CURRENT) {
+                        cdata = ".";
+                        clen = 1;
+                    } else if (component->flags & SUSP_SL_PARENT) {
+                        cdata = "..";
+                        clen = 2;
+                    } else if (component->flags & SUSP_SL_ROOT) {
+                        clen = 0;
+                        vmfree(out->sl.target, out->sl.length);
+                        out->sl.target = vmalloc(1);
+                        out->sl.length = 1;
+                        *(char *)out->sl.target = '/';
+                    } else if (component->flags & SUSP_SL_MOUNT) {
+                        clen = 0;
+                        vmfree(out->sl.target, out->sl.length);
+                        out->sl.length = vfs_alloc_path(&out->sl.target, fs->base.mountpoint);
+                    } else if (component->flags & SUSP_SL_HOSTNAME) {
+                        // TODO: Actually get the hostname properly
+                        cdata = "<hostname>";
+                        clen = 10;
+                    }
+
+                    if (clen) {
+                        bool add_slash = out->sl.length && !sl_was_continue;
+
+                        size_t tlen = clen + out->sl.length + !!add_slash;
+                        char *buffer = vmalloc(tlen);
+                        memcpy(buffer, out->sl.target, out->sl.length);
+                        if (add_slash) buffer[out->sl.length] = '/';
+                        memcpy(buffer + out->sl.length + !!add_slash, cdata, clen);
+                        vmfree(out->sl.target, out->sl.length);
+                        out->sl.target = buffer;
+                        out->sl.length = tlen;
+                    }
+
+                    sl_was_continue = component->flags & SUSP_SL_CONTINUE;
+
+                    offset += component->length + offsetof(susp_sl_component_t, data);
+                    area_len -= component->length + offsetof(susp_sl_component_t, data);
+                }
+
+                break;
+            }
+            case SUSP_ST: su_size = cur_su->length; break;
+            case SUSP_TF:
+                out->have_tf_creation = cur_su->tf.flags & SUSP_TF_CREATION;
+                out->have_tf_modify = cur_su->tf.flags & SUSP_TF_MODIFY;
+                out->have_tf_access = cur_su->tf.flags & SUSP_TF_ACCESS;
+                out->have_tf_attributes = cur_su->tf.flags & SUSP_TF_ATTRIBUTES;
+                out->have_tf_backup = cur_su->tf.flags & SUSP_TF_BACKUP;
+                out->have_tf_expiration = cur_su->tf.flags & SUSP_TF_EXPIRATION;
+                out->have_tf_effective = cur_su->tf.flags & SUSP_TF_EFFECTIVE;
+
+                size_t i = 0;
+#define GET()                                                                                                          \
+    ((cur_su->tf.flags & SUSP_TF_LONG_FORM) ? create_timespec_long(&cur_su->tf.lform[i++])                             \
+                                            : create_timespec(&cur_su->tf.sform[i++]))
+#define GETN(name)                                                                                                     \
+    if (out->have_tf_##name) out->tf.name = GET();
+                GETN(creation);
+                GETN(modify);
+                GETN(access);
+                GETN(attributes);
+                GETN(backup);
+                GETN(expiration);
+                GETN(effective);
+#undef GETN
+#undef GET
+                break;
+            }
+
+            su_size -= cur_su->length;
+            cur_su = (void *)cur_su + cur_su->length;
+        }
+
+        if (!ce_field) break;
+
+        su_size = ce_field->ce.length.le;
+
+        size_t block_mask = (1ul << fs->device->block_shift) - 1;
+        size_t new_alloc_size = (ce_field->ce.offset.le + su_size + block_mask) & ~block_mask;
+        void *new_alloc_area = vmalloc(new_alloc_size);
+        cur_su = new_alloc_area + ce_field->ce.offset.le;
+
+        int error = fs->device->ops->rvirt(
+                fs->device,
+                new_alloc_area,
+                (uint64_t)ce_field->ce.location.le << (fs->block_shift - fs->device->block_shift),
+                new_alloc_size >> fs->device->block_shift
+        );
+        vmfree(alloc_area, alloc_size);
+        if (unlikely(error)) {
+            vmfree(new_alloc_area, new_alloc_size);
+            return error;
+        }
+
+        alloc_area = new_alloc_area;
+        alloc_size = new_alloc_size;
+    }
+
+    vmfree(alloc_area, alloc_size);
+    return 0;
+}
+
+static void rr_cleanup(struct rr_info *info) {
+    vmfree(info->sl.target, info->sl.length);
+}
+
+static int dirino_init(iso9660_fs_t *fs, iso9660_inode_t *inode, struct rr_info *rr_info) {
+    if (fs->need_px) return 0;
+
     uint64_t offset = 0;
 
     while (offset < inode->base.size) {
-        dirent_t entry;
+        full_dirent_t entry;
         int error = pgcache_read(&inode->base.data, &entry, sizeof(entry), offset);
         if (unlikely(error)) return error;
-        if (!entry.length) break;
+        if (!entry.common.length) break;
 
-        // filter out . and ..
-        if (entry.name_length != 1 || entry.name[0] >= 2) {
-            if (entry.flags & DENT_DIRECTORY) inode->base.nlink += 1;
+        if (inode->base.ino == INO_BASE && offset == 0) {
+            // Check for SUSP presence
+            size_t offset = get_susp_off(entry.common.name_length, 0);
+
+            if (offset < entry.common.length && entry.common.length - offset >= 7 &&
+                !memcmp((void *)&entry + offset, "SP\x07\x01\xbe\xef", 6)) {
+                susp_field_t *field = (void *)&entry + offset;
+                fs->rr_skip = field->sp.skip;
+
+                error = get_rr_info(fs, &entry, rr_info);
+                if (unlikely(error)) return error;
+
+                if (rr_info->have_px) {
+                    fs->need_px = true;
+                    return 0;
+                }
+            }
         }
 
-        offset += entry.length;
+        // filter out . and ..
+        if (entry.common.name_length != 1 || entry.common.name[0] >= 2) {
+            if (entry.common.flags & DENT_DIRECTORY) inode->base.nlink += 1;
+        }
+
+        offset += entry.common.length;
     }
 
     return 0;
@@ -189,8 +551,11 @@ static int create_inode(
         ino_t ino,
         extent_t *extents,
         size_t extc,
-        uint64_t size
+        uint64_t size,
+        struct rr_info *rr_info
 ) {
+    if (fs->need_px && !rr_info->have_px) return EINVAL;
+
     iso9660_inode_t *inode = vmalloc(sizeof(*inode));
     memset(inode, 0, sizeof(*inode));
     inode->base.ops = &iso9660_inode_ops;
@@ -199,30 +564,92 @@ static int create_inode(
     inode->base.data.ops = &iso9660_pgcache_ops;
     inode->base.size = size;
     inode->base.blocks = (inode->base.size + (fs->base.block_size - 1)) >> fs->block_shift;
-    inode->base.atime = create_timespec(&entry->record_time);
-    inode->base.ctime = inode->base.atime;
-    inode->base.mtime = inode->base.atime;
 
     inode->extents = extents;
     inode->num_extents = extc;
     inode->cur.extent = inode->extents;
 
-    pgcache_resize(&inode->base.data, inode->base.size);
-
     if (entry->flags & DENT_DIRECTORY) {
-        inode->base.mode = S_IFDIR | 0777;
+        inode->base.mode = S_IFDIR | 0555;
         inode->base.nlink = 2;
         inode->base.directory = &iso9660_dir_ops;
 
-        int error = dirino_init(fs, inode);
-        if (unlikely(error)) {
-            pgcache_resize(&inode->base.data, 0);
-            vmfree(inode, sizeof(*inode));
-            return 0;
+        if (!fs->need_px) {
+            pgcache_resize(&inode->base.data, inode->base.size);
+
+            int error = dirino_init(fs, inode, rr_info);
+            if (unlikely(error)) {
+                pgcache_resize(&inode->base.data, 0);
+                vmfree(inode, sizeof(*inode));
+                return 0;
+            }
         }
     } else {
-        inode->base.mode = S_IFREG | 0777;
+        inode->base.mode = S_IFREG | 0555;
         inode->base.nlink = 1;
+    }
+
+    if (rr_info->have_px) {
+        inode->base.mode = rr_info->px.mode & 07777;
+
+        switch (rr_info->px.mode & 0170000) {
+        case 0010000: inode->base.mode |= S_IFIFO; break;
+        case 0020000: inode->base.mode |= S_IFCHR; break;
+        case 0040000: inode->base.mode |= S_IFDIR; break;
+        case 0060000: inode->base.mode |= S_IFBLK; break;
+        case 0100000: inode->base.mode |= S_IFREG; break;
+        case 0120000: inode->base.mode |= S_IFLNK; break;
+        case 0140000: inode->base.mode |= S_IFSOCK; break;
+        }
+
+        if ((entry->flags & DENT_DIRECTORY) && !S_ISDIR(inode->base.mode)) {
+            pgcache_resize(&inode->base.data, 0);
+            vmfree(inode, sizeof(*inode));
+            return EINVAL;
+        }
+
+        inode->base.nlink = rr_info->px.nlink;
+        inode->base.uid = rr_info->px.uid;
+        inode->base.gid = rr_info->px.gid;
+
+        switch (inode->base.mode & S_IFMT) {
+        case S_IFBLK:
+        case S_IFCHR: inode->base.device = rr_info->pn.dev; break;
+        case S_IFLNK:
+            inode->base.symlink = rr_info->sl.target;
+            inode->base.size = rr_info->sl.length;
+            rr_info->sl.target = nullptr; // prevent it from being freed
+            break;
+        }
+
+        if (rr_info->have_tf_creation) {
+            inode->base.atime = rr_info->tf.creation;
+            inode->base.ctime = inode->base.atime;
+            inode->base.mtime = inode->base.atime;
+        }
+
+        if (rr_info->have_tf_access) {
+            inode->base.atime = rr_info->tf.access;
+            inode->base.ctime = inode->base.atime;
+            inode->base.mtime = inode->base.atime;
+        }
+
+        if (rr_info->have_tf_modify) {
+            inode->base.mtime = rr_info->tf.modify;
+            inode->base.ctime = inode->base.mtime;
+        }
+
+        if (rr_info->have_tf_attributes) {
+            inode->base.ctime = rr_info->tf.attributes;
+        }
+    } else {
+        inode->base.atime = create_timespec(&entry->record_time);
+        inode->base.ctime = inode->base.atime;
+        inode->base.mtime = inode->base.atime;
+    }
+
+    if (S_ISREG(inode->base.mode)) {
+        pgcache_resize(&inode->base.data, inode->base.size);
     }
 
     init_inode(&fs->base, &inode->base);
@@ -295,6 +722,83 @@ static int get_extent_list(
     return 0;
 }
 
+static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *entry, dentry_t *dent, uint64_t offset) {
+    struct rr_info rr_info = {};
+    int error = get_rr_info(fs, entry, &rr_info);
+    if (unlikely(error)) return error;
+    if (rr_info.have_rn) goto exit; // skip entries with RE
+
+    void *name;
+    size_t len;
+
+    if (rr_info.nm.length) {
+        name = rr_info.nm.data;
+        len = rr_info.nm.length;
+    } else {
+        // transform name so that it can be memcmp'd
+        len = entry->common.name_length;
+
+        if (!(entry->common.flags & DENT_DIRECTORY)) {
+            // get rid of ;<version>
+            while (len > 0 && entry->common.name[len - 1] != ';') len--;
+            if (len) len--;
+
+            // if there is no extension, get rid of the dot
+            if (len > 1 && entry->common.name[len - 1] == '.') len--;
+        }
+
+        for (size_t i = 0; i < len; i++) {
+            unsigned char c = entry->common.name[i];
+            if (c >= 'A' && c <= 'Z') entry->common.name[i] = c + ('a' - 'A');
+        }
+    }
+
+    if (len == dent->name.length && !memcmp(name, dent->name.data, len)) {
+        if (rr_info.have_cl) {
+            // get actual data from . entry
+            extent_t temp_extent = {
+                    rr_info.cl.lba,
+                    UINT32_MAX,
+            };
+            iso9660_inode_t temp_inode = {
+                    .base.filesystem = &fs->base,
+                    .base.data.ops = &iso9660_pgcache_ops,
+                    .extents = &temp_extent,
+                    .num_extents = 1,
+                    .cur.extent = &temp_extent,
+            };
+            pgcache_resize(&temp_inode.base.data, sizeof(*entry));
+            error = pgcache_read(&temp_inode.base.data, entry, sizeof(*entry), 0);
+            pgcache_resize(&temp_inode.base.data, 0);
+            if (unlikely(error)) goto exit;
+            rr_cleanup(&rr_info);
+            error = get_rr_info(fs, entry, &rr_info);
+            if (unlikely(error)) return error;
+        }
+
+        extent_t *extents;
+        size_t ext_count;
+        uint64_t size;
+        error = get_extent_list(fs, self, entry->common, offset, &extents, &ext_count, &size);
+        if (unlikely(error)) goto exit;
+
+        error = create_inode(
+                &dent->inode,
+                fs,
+                &entry->common,
+                INO_BASE + (fblock_to_lba(self, offset >> fs->block_shift) << fs->block_shift) + offset,
+                extents,
+                ext_count,
+                size,
+                &rr_info
+        );
+    }
+
+exit:
+    rr_cleanup(&rr_info);
+    return error;
+}
+
 static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
     iso9660_inode_t *self = (iso9660_inode_t *)ptr;
     iso9660_fs_t *fs = (iso9660_fs_t *)self->base.filesystem;
@@ -310,40 +814,9 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
 
         // filter out . and ..
         if (cur.common.name_length != 1 || cur.common.name[0] >= 2) {
-            // transform name so that it can be memcmp'd
-            size_t len = cur.common.name_length;
-
-            if (!(cur.common.flags & DENT_DIRECTORY)) {
-                // get rid of ;<version>
-                while (len > 0 && cur.common.name[len - 1] != ';') len--;
-                if (len) len--;
-
-                // if there is no extension, get rid of the dot
-                if (len > 1 && cur.common.name[len - 1] == '.') len--;
-            }
-
-            for (size_t i = 0; i < len; i++) {
-                unsigned char c = cur.common.name[i];
-                if (c >= 'A' && c <= 'Z') cur.common.name[i] = c + ('a' - 'A');
-            }
-
-            if (len == entry->name.length && !memcmp(cur.common.name, entry->name.data, len)) {
-                extent_t *extents;
-                size_t ext_count;
-                uint64_t size;
-                error = get_extent_list(fs, self, cur.common, offset, &extents, &ext_count, &size);
-                if (unlikely(error)) return error;
-
-                return create_inode(
-                        &entry->inode,
-                        fs,
-                        &cur.common,
-                        (fblock_to_lba(self, offset >> fs->block_shift) << fs->block_shift) + offset,
-                        extents,
-                        ext_count,
-                        size
-                );
-            }
+            int error = try_dirent(fs, self, &cur, entry, offset);
+            if (unlikely(error)) return error;
+            if (entry->inode) return 0;
         }
 
         offset += cur.common.length;
@@ -478,20 +951,24 @@ int iso9660_create(fs_t **out, void *ctx) {
     fs->base.blocks = primdesc->primary.num_blocks.le;
     fs->device = dev;
     fs->block_shift = __builtin_ctz(fs->base.block_size);
+    fs->rr_skip = 0xff;
 
     extent_t *extents = vmalloc(sizeof(*extents));
     make_extent(fs, extents, &primdesc->primary.root_dirent);
 
+    struct rr_info rr_info = {};
     inode_t *root;
     error = create_inode(
             &root,
             fs,
             &primdesc->primary.root_dirent,
-            0,
+            INO_BASE,
             extents,
             1,
-            primdesc->primary.root_dirent.extent_len.le
+            primdesc->primary.root_dirent.extent_len.le,
+            &rr_info
     );
+    rr_cleanup(&rr_info);
     if (unlikely(error)) {
         vmfree(fs, sizeof(*fs));
         goto exit;
