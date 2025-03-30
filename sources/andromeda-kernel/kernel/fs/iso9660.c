@@ -182,14 +182,22 @@ static int dirino_init(iso9660_fs_t *, iso9660_inode_t *inode) {
     return 0;
 }
 
-static int create_inode(inode_t **out, iso9660_fs_t *fs, dirent_t *entry, ino_t ino, extent_t *extents, size_t extc) {
+static int create_inode(
+        inode_t **out,
+        iso9660_fs_t *fs,
+        dirent_t *entry,
+        ino_t ino,
+        extent_t *extents,
+        size_t extc,
+        uint64_t size
+) {
     iso9660_inode_t *inode = vmalloc(sizeof(*inode));
     memset(inode, 0, sizeof(*inode));
     inode->base.ops = &iso9660_inode_ops;
     inode->base.filesystem = &fs->base;
     inode->base.ino = ino;
     inode->base.data.ops = &iso9660_pgcache_ops;
-    inode->base.size = entry->extent_len.le;
+    inode->base.size = size;
     inode->base.blocks = (inode->base.size + (fs->base.block_size - 1)) >> fs->block_shift;
     inode->base.atime = create_timespec(&entry->record_time);
     inode->base.ctime = inode->base.atime;
@@ -251,8 +259,10 @@ static int get_extent_list(
         dirent_t entry, // passed by value to prevent read values from leaking back into the main dirent
         uint64_t offset,
         extent_t **aout,
-        size_t *lout
+        size_t *lout,
+        uint64_t *sout
 ) {
+    uint64_t size = 0;
     extent_t *extents = nullptr;
     size_t count = 0;
 
@@ -265,6 +275,7 @@ static int get_extent_list(
         extents = new_list;
 
         make_extent(fs, &extents[count], &entry);
+        size += entry.extent_len.le;
         count++;
 
         if (!(entry.flags & DENT_MID_EXTENT)) break;
@@ -279,6 +290,7 @@ static int get_extent_list(
 
     *aout = extents;
     *lout = count;
+    *sout = size;
 
     return 0;
 }
@@ -318,7 +330,8 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
             if (len == entry->name.length && !memcmp(cur.common.name, entry->name.data, len)) {
                 extent_t *extents;
                 size_t ext_count;
-                error = get_extent_list(fs, self, cur.common, offset, &extents, &ext_count);
+                uint64_t size;
+                error = get_extent_list(fs, self, cur.common, offset, &extents, &ext_count, &size);
                 if (unlikely(error)) return error;
 
                 return create_inode(
@@ -327,7 +340,8 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
                         &cur.common,
                         (fblock_to_lba(self, offset >> fs->block_shift) << fs->block_shift) + offset,
                         extents,
-                        ext_count
+                        ext_count,
+                        size
                 );
             }
         }
@@ -469,7 +483,15 @@ int iso9660_create(fs_t **out, void *ctx) {
     make_extent(fs, extents, &primdesc->primary.root_dirent);
 
     inode_t *root;
-    error = create_inode(&root, fs, &primdesc->primary.root_dirent, 0, extents, 1);
+    error = create_inode(
+            &root,
+            fs,
+            &primdesc->primary.root_dirent,
+            0,
+            extents,
+            1,
+            primdesc->primary.root_dirent.extent_len.le
+    );
     if (unlikely(error)) {
         vmfree(fs, sizeof(*fs));
         goto exit;
