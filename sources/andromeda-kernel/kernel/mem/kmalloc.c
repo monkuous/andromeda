@@ -24,10 +24,10 @@ void *kmalloc(size_t size) {
     int order = ORDER(size);
     if (unlikely(order > MAX_ORDER)) return nullptr;
 
-    struct free_obj *obj = objects[order];
+    struct free_obj *obj = objects[order - MIN_ORDER];
 
     if (likely(obj)) {
-        objects[order] = obj->next;
+        objects[order - MIN_ORDER] = obj->next;
     } else {
         uintptr_t addr = vmem_alloc(ALLOC_SIZE);
         pmap_alloc(addr, ALLOC_SIZE, PMAP_WRITABLE);
@@ -45,7 +45,7 @@ void *kmalloc(size_t size) {
             }
 
             last->next = nullptr;
-            objects[order] = obj->next;
+            objects[order - MIN_ORDER] = obj->next;
         }
     }
 
@@ -60,6 +60,6 @@ void kfree(void *ptr, size_t size) {
     if (size < sizeof(struct free_obj)) size = sizeof(struct free_obj);
     int order = ORDER(size);
 
-    obj->next = objects[order];
-    objects[order] = obj;
+    obj->next = objects[order - MIN_ORDER];
+    objects[order - MIN_ORDER] = obj;
 }
