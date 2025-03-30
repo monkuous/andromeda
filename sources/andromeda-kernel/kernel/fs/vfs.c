@@ -1116,7 +1116,7 @@ int vfs_ftruncate(file_t *file, off_t size) {
 
 static int chown_inode(inode_t *inode, uid_t uid, gid_t gid) {
     if (current->process->euid) {
-        if (uid != (uid_t)-1) return EPERM;
+        if (uid != (uid_t)-1 && uid != inode->uid) return EPERM;
         if (gid != (gid_t)-1 && gid != inode->gid && get_relation(-1, gid, false) != REL_GROUP) return EPERM;
     }
 
