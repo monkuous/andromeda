@@ -23,13 +23,11 @@ typedef struct {
     fs_t base;
     bdev_t *device;
     flat_pgcache_t fat;
-    flat_pgcache_t data;
-    flat_pgcache_t root;
+    uint64_t root_block;
     uint64_t root_size;
     int fat_entry_size; // 1 means 12 bits
     int cluster_block_shift;
     uint64_t data_block;
-    size_t cluster_size;
 } fatfs_t;
 
 typedef struct {
@@ -98,9 +96,9 @@ static int next_cluster(fatfs_t *fs, uint32_t *cluster) {
 }
 
 static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
-    fat_inode_t *inode = container(fat_inode_t, base.regular, self);
+    fat_inode_t *inode = container(fat_inode_t, base.data, self);
     fatfs_t *fs = (fatfs_t *)inode->base.filesystem;
-    uint32_t clust_size = fs->cluster_size;
+    uint32_t clust_size = fs->base.block_size;
 
     if (idx < inode->cur.idx || (idx == inode->cur.idx && inode->cur.offset != 0)) {
         inode->cur.cluster = inode->cluster;
@@ -108,42 +106,65 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
         inode->cur.offset = 0;
     }
 
-    while (inode->cur.idx < idx) {
-        int error = next_cluster(fs, &inode->cur.cluster);
-        if (unlikely(error)) return error;
+    if (inode->cur.cluster >= 2) {
+        while (inode->cur.idx < idx) {
+            int error = next_cluster(fs, &inode->cur.cluster);
+            if (unlikely(error)) return error;
 
-        inode->cur.offset += clust_size;
+            inode->cur.offset += clust_size;
 
-        if (inode->cur.offset == PAGE_SIZE) {
-            inode->cur.idx += 1;
-            inode->cur.offset = 0;
-        }
-    }
-
-    uint32_t phys = page_to_phys(page);
-
-    while (inode->cur.offset < PAGE_SIZE) {
-        if (inode->cur.cluster >= 0xffffff8) {
-            memset(pmap_tmpmap(phys) + inode->cur.offset, 0, PAGE_SIZE - inode->cur.offset);
-            return 0;
+            if (inode->cur.offset == PAGE_SIZE) {
+                inode->cur.idx += 1;
+                inode->cur.offset = 0;
+            }
         }
 
-        int error = fs->device->ops->rphys(
-                fs->device,
-                phys + inode->cur.offset,
-                fs->data_block + ((inode->cur.cluster - 2) << fs->cluster_block_shift),
-                1ul << fs->cluster_block_shift
-        );
-        if (unlikely(error)) return error;
+        uint32_t phys = page_to_phys(page);
 
-        error = next_cluster(fs, &inode->cur.cluster);
-        if (unlikely(error)) return error;
+        while (inode->cur.offset < PAGE_SIZE) {
+            if (inode->cur.cluster >= 0xffffff8) {
+                memset(pmap_tmpmap(phys) + inode->cur.offset, 0, PAGE_SIZE - inode->cur.offset);
+                return 0;
+            }
 
-        inode->cur.offset += clust_size;
+            int error = fs->device->ops->rphys(
+                    fs->device,
+                    phys + inode->cur.offset,
+                    fs->data_block + ((inode->cur.cluster - 2) << fs->cluster_block_shift),
+                    1ul << fs->cluster_block_shift
+            );
+            if (unlikely(error)) return error;
+
+            error = next_cluster(fs, &inode->cur.cluster);
+            if (unlikely(error)) return error;
+
+            inode->cur.offset += clust_size;
+        }
+
+        inode->cur.idx += 1;
+        inode->cur.offset = 0;
+    } else {
+        uint64_t start = idx << PAGE_SHIFT;
+
+        if (start < fs->root_size) {
+            uint64_t avail = fs->root_size - start;
+
+            if (avail < PAGE_SIZE) {
+                memset(pmap_tmpmap(page_to_phys(page)) + avail, 0, PAGE_SIZE - avail);
+            } else {
+                avail = PAGE_SIZE;
+            }
+
+            return fs->device->ops->rphys(
+                    fs->device,
+                    page_to_phys(page),
+                    fs->root_block + (start >> fs->device->block_shift),
+                    avail >> fs->device->block_shift
+            );
+        } else {
+            memset(pmap_tmpmap(page_to_phys(page)), 0, PAGE_SIZE);
+        }
     }
-
-    inode->cur.idx += 1;
-    inode->cur.offset = 0;
 
     return 0;
 }
@@ -197,19 +218,6 @@ static bool make_fat_name(uint8_t buffer[FAT_NAME_LEN], dname_t *name) {
     return true;
 }
 
-static int chain_length(fatfs_t *fs, uint32_t cluster, uint32_t *out) {
-    uint32_t len = 0;
-
-    while (cluster < 0xffffff8) {
-        len += 1;
-        int error = next_cluster(fs, &cluster);
-        if (unlikely(error)) return error;
-    }
-
-    *out = len;
-    return 0;
-}
-
 static struct timespec create_timespec(uint16_t date, uint16_t time, uint16_t time_cs) {
     struct timespec spec;
 
@@ -223,48 +231,36 @@ static struct timespec create_timespec(uint16_t date, uint16_t time, uint16_t ti
     return spec;
 }
 
-static int dirino_init(fatfs_t *fs, fat_inode_t *inode) {
-    uint32_t cluster = inode->cluster;
-    bool done_reading_entries = false;
+static int get_block_count(fatfs_t *fs, uint32_t cluster, blkcnt_t *out) {
+    if (cluster < 2) return 0;
+
+    blkcnt_t len = 0;
 
     while (cluster < 0xffffff8) {
-        uint64_t base_offset;
-        uint64_t clust_size;
+        len += 1;
+        int error = next_cluster(fs, &cluster);
+        if (unlikely(error)) return error;
+    }
 
-        if (cluster >= 2) {
-            clust_size = fs->cluster_size;
-            base_offset = (cluster - 2) * clust_size;
-        } else {
-            clust_size = fs->root_size;
-            base_offset = 0;
-        }
+    *out = len;
+    return 0;
+}
 
-        if (!done_reading_entries) {
-            for (size_t i = 0; i < clust_size; i += sizeof(fat_dirent_t)) {
-                uint64_t offset = base_offset + i;
+static int dirino_init(fatfs_t *fs, fat_inode_t *inode) {
+    uint64_t max = inode->cluster >= 2 ? (uint64_t)inode->base.blocks * fs->base.block_size : fs->root_size;
 
-                fat_dirent_t cur;
-                int error = pgcache_read(&fs->data.base, &cur, sizeof(cur), offset);
-                if (unlikely(error)) return error;
+    for (uint64_t i = 0; i < max; i += sizeof(fat_dirent_t)) {
+        fat_dirent_t entry;
+        int error = pgcache_read(&inode->base.data, &entry, sizeof(entry), i);
+        if (unlikely(error)) return error;
 
-                if (cur.name[0] == 0) {
-                    done_reading_entries = true;
-                    break;
-                }
+        if (entry.name[0] == 0) break;
+        if (entry.name[0] == 0xe5) continue;
 
-                if (cur.name[0] == 0xe5) continue;
+        if (!memcmp(entry.name, ".          ", 11)) continue;
+        if (!memcmp(entry.name, "..         ", 11)) continue;
 
-                if (cur.attr & DENT_DIRECTORY) inode->base.nlink += 1;
-            }
-        }
-
-        if (cluster >= 2) {
-            inode->base.blocks += 1;
-            int error = next_cluster(fs, &cluster);
-            if (unlikely(error)) return error;
-        } else {
-            break;
-        }
+        if (entry.attr & DENT_DIRECTORY) inode->base.nlink += 1;
     }
 
     return 0;
@@ -274,7 +270,9 @@ static int create_inode(inode_t **out, fatfs_t *fs, fat_dirent_t *entry, ino_t i
     fat_inode_t *inode = vmalloc(sizeof(*inode));
     memset(inode, 0, sizeof(*inode));
     inode->base.ops = &fat_inode_ops;
+    inode->base.filesystem = &fs->base;
     inode->base.ino = ino;
+    inode->base.data.ops = &fat_pgcache_ops;
 
     inode->cluster = extend_cluster(fs, entry->cluster_low | ((uint32_t)entry->cluster_high << 16));
     inode->cur.cluster = inode->cluster;
@@ -284,27 +282,30 @@ static int create_inode(inode_t **out, fatfs_t *fs, fat_dirent_t *entry, ino_t i
         inode->base.nlink = 2;
         inode->base.directory = &fat_dir_ops;
 
-        int error = dirino_init(fs, inode);
+        int error = get_block_count(fs, inode->cluster, &inode->base.blocks);
         if (unlikely(error)) {
+            vmfree(inode, sizeof(*inode));
+            return error;
+        }
+
+        pgcache_resize(
+                &inode->base.data,
+                inode->cluster >= 2 ? (uint64_t)inode->base.blocks * fs->base.block_size : fs->root_size
+        );
+
+        error = dirino_init(fs, inode);
+        if (unlikely(error)) {
+            pgcache_resize(&inode->base.data, 0);
             vmfree(inode, sizeof(*inode));
             return error;
         }
     } else {
-        inode->base.mode = S_IFREG | 0644;
+        inode->base.mode = S_IFREG | 0755;
         inode->base.nlink = 1;
         inode->base.size = entry->size;
+        inode->base.blocks = (entry->size + (fs->base.block_size - 1)) / fs->base.block_size;
 
-        uint32_t clusters;
-        int error = chain_length(fs, inode->cluster, &clusters);
-        if (unlikely(error)) {
-            vmfree(inode, sizeof(*inode));
-            return error;
-        }
-
-        inode->base.blocks = clusters;
-
-        inode->base.regular.ops = &fat_pgcache_ops;
-        pgcache_resize(&inode->base.regular, inode->base.size);
+        pgcache_resize(&inode->base.data, inode->base.size);
     }
 
     if (entry->attr & DENT_READ_ONLY) inode->base.mode &= ~0222;
@@ -325,47 +326,28 @@ static int fat_inode_lookup(inode_t *ptr, dentry_t *entry) {
     fatfs_t *fs = (fatfs_t *)ptr->filesystem;
     fat_inode_t *self = (fat_inode_t *)ptr;
 
-    uint32_t cluster = self->cluster;
+    uint64_t ino_offset;
+    uint64_t max;
 
-    while (cluster < 0xffffff8) {
-        uint64_t ino_offset;
-        uint64_t base_offset;
-        uint64_t clust_size;
-        pgcache_t *cache;
+    if (self->cluster >= 2) {
+        ino_offset = (fs->data_block << fs->device->block_shift) + (uint64_t)self->cluster * fs->base.block_size;
+        max = self->base.blocks * fs->base.block_size;
+    } else {
+        ino_offset = fs->root_block << fs->device->block_shift;
+        max = fs->root_size;
+    }
 
-        if (cluster >= 2) {
-            ino_offset = 0;
-            clust_size = fs->cluster_size;
-            base_offset = (cluster - 2) * clust_size;
-            cache = &fs->data.base;
-        } else {
-            ino_offset = 0x8000000000000000;
-            clust_size = fs->root_size;
-            base_offset = 0;
-            cache = &fs->root.base;
-        }
+    for (uint64_t off = 0; off < max; off += sizeof(fat_dirent_t)) {
+        fat_dirent_t cur;
+        int error = pgcache_read(&self->base.data, &cur, sizeof(cur), off);
+        if (unlikely(error)) return error;
 
-        for (size_t i = 0; i < clust_size; i += sizeof(fat_dirent_t)) {
-            uint64_t offset = base_offset + i;
+        if (cur.name[0] == 0) break;
+        if (cur.name[0] == 0xe5) continue;
+        if (cur.attr & DENT_VOLUME_ID) continue;
+        if (memcmp(cur.name, fat_name, sizeof(fat_name))) continue;
 
-            fat_dirent_t cur;
-            int error = pgcache_read(cache, &cur, sizeof(cur), offset);
-            if (unlikely(error)) return error;
-
-            if (cur.name[0] == 0) return ENOENT;
-            if (cur.name[0] == 0xe5) continue;
-            if (cur.attr & DENT_VOLUME_ID) continue;
-            if (memcmp(cur.name, fat_name, sizeof(fat_name))) continue;
-
-            return create_inode(&entry->inode, fs, &cur, ino_offset + offset);
-        }
-
-        if (cluster >= 2) {
-            int error = next_cluster(fs, &cluster);
-            if (unlikely(error)) return error;
-        } else {
-            break;
-        }
+        return create_inode(&entry->inode, fs, &cur, ino_offset + off);
     }
 
     return ENOENT;
@@ -441,9 +423,7 @@ int fat_create(fs_t **out, void *ctx) {
     int error = dev->ops->rvirt(dev, bpb, 0, bpb_count);
     if (unlikely(error)) goto exit;
 
-    if (bpb->signature != 0xaa55) goto exit;
-
-    if (!bpb->sector_size || !bpb->cluster_size || !bpb->num_reserved || !bpb->num_fats ||
+    if (bpb->signature != 0xaa55 || !bpb->sector_size || !bpb->cluster_size || !bpb->num_reserved || !bpb->num_fats ||
         bpb->sector_size < block_size) {
         error = EINVAL;
         goto exit;
@@ -510,24 +490,22 @@ int fat_create(fs_t **out, void *ctx) {
     fs->base.ops = &fatfs_ops;
     fs->base.device = dev->id;
     fs->base.flags = ST_RDONLY;
-    fs->base.block_size = bpb->sector_size;
+    fs->base.block_size = cluster_size;
     fs->base.max_name_len = 8; // TODO: VFAT
     fs->base.blocks = data_clusters;
     fs->device = dev;
     fs->cluster_block_shift = __builtin_ctz(cluster_size) - dev->block_shift;
     fs->data_block = (data_offset * bpb->sector_size) >> dev->block_shift;
-    fs->cluster_size = cluster_size;
 
     init_flat_pgcache(&fs->fat, dev, fat_offset * bpb->sector_size, fat_size * bpb->sector_size);
-    init_flat_pgcache(&fs->data, dev, data_offset * bpb->sector_size, (uint64_t)data_clusters * cluster_size);
 
     fat_dirent_t root_dirent = {
             .attr = DENT_DIRECTORY,
     };
 
     if (!is_fat32) {
+        fs->root_block = (root_offset * bpb->sector_size) >> dev->block_shift;
         fs->root_size = root_size * bpb->sector_size;
-        init_flat_pgcache(&fs->root, dev, root_offset * bpb->sector_size, fs->root_size);
         fs->fat_entry_size = 1 + (data_clusters >= 4085);
     } else {
         fs->fat_entry_size = 4;
@@ -539,8 +517,6 @@ int fat_create(fs_t **out, void *ctx) {
     error = create_inode(&root, fs, &root_dirent, UINT64_MAX);
     if (unlikely(error)) {
         pgcache_resize(&fs->fat.base, 0);
-        pgcache_resize(&fs->data.base, 0);
-        pgcache_resize(&fs->root.base, 0);
         vmfree(fs, sizeof(*fs));
         goto exit;
     }

@@ -5,4 +5,5 @@ packages:
       subdir: ports
       version: '0.0pl@ROLLING_ID@'
     pkgs_required:
+      - andromeda-init
       - andromeda-kernel

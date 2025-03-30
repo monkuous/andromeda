@@ -96,7 +96,9 @@ static size_t expand_loopbacks() {
     return num_loopbacks++;
 }
 
-int create_loopback(dev_t *out, file_t *file) {
+int create_loopback(dev_t *out, file_t *file, size_t block_size) {
+    if (block_size & (block_size - 1)) return EINVAL;
+
     int error = access_file(file, R_OK);
     if (unlikely(error)) return error;
 
@@ -112,8 +114,8 @@ int create_loopback(dev_t *out, file_t *file) {
     loopback_bdev_t *device = loopbacks[id] = vmalloc(sizeof(*device));
     memset(device, 0, sizeof(*device));
     device->base.ops = &loopback_ops;
-    device->base.blocks = stat.st_blocks;
-    device->base.block_shift = __builtin_ctz(stat.st_blksize);
+    device->base.block_shift = __builtin_ctz(block_size);
+    device->base.blocks = (stat.st_size + (block_size - 1)) >> device->base.block_shift;
     device->base.id = id;
     device->file = file;
     device->buffer = vmalloc(BUF_SIZE);

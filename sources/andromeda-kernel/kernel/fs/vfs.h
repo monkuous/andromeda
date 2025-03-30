@@ -118,10 +118,11 @@ struct inode {
     struct timespec mtime;
     blkcnt_t blocks;
 
+    pgcache_t data;
+
     union {
         dev_t device;
         const file_ops_t *directory;
-        pgcache_t regular;
         void *symlink;
     };
 };

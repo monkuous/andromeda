@@ -241,8 +241,8 @@ void bootmem_handover() {
     iter_usable_regions_aligned(add_regions, nullptr);
 
     // leave one page unmapped as a guard page
-    if (KERN_PHYS_BASE > PAGE_SIZE) {
-        vmem_add_range(KERN_VIRT_BASE, KERN_VIRT_BASE + KERN_PHYS_BASE - PAGE_SIZE - 1);
+    if (KERN_PHYS_BASE > 2 * PAGE_SIZE) {
+        vmem_add_range(KERN_VIRT_BASE + PAGE_SIZE, KERN_VIRT_BASE + KERN_PHYS_BASE - PAGE_SIZE - 1);
     }
 
     vmem_add_range(parr_vtail_aligned + 1, PTBL_VIRT_BASE - 1);

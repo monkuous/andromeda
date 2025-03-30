@@ -9,6 +9,7 @@ packages:
       - args:
           - 'mkdir'
           - '-p'
+          - '@THIS_COLLECT_DIR@/dev'
           - '@THIS_COLLECT_DIR@/usr/bin'
           - '@THIS_COLLECT_DIR@/usr/lib'
       - args:

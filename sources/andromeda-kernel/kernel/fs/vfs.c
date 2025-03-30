@@ -85,12 +85,12 @@ static void remove_dentry(dentry_t *entry) {
 
 void dentry_ref(dentry_t *entry) {
     entry->references += 1;
-    entry->filesystem->indirect_refs += 1;
+    if (entry->filesystem) entry->filesystem->indirect_refs += 1;
 }
 
 void dentry_deref(dentry_t *entry) {
     for (;;) {
-        entry->filesystem->indirect_refs -= 1;
+        if (entry->filesystem) entry->filesystem->indirect_refs -= 1;
 
         if (--entry->references == 0) {
             dentry_t *parent = entry->parent;
@@ -131,7 +131,7 @@ void inode_deref(inode_t *inode) {
 
     if (--inode->references == 0) {
         switch (inode->mode & S_IFMT) {
-        case S_IFREG: pgcache_resize(&inode->regular, 0); break;
+        case S_IFREG: pgcache_resize(&inode->data, 0); break;
         case S_IFLNK: vmfree(inode->symlink, inode->size); break;
         }
 
@@ -249,7 +249,7 @@ static int regular_read(file_t *self, void *buffer, size_t *size, uint64_t offse
     if (remaining > available) remaining = available;
 
     if (remaining) {
-        int error = pgcache_read(&self->inode->regular, buffer, remaining, offset);
+        int error = pgcache_read(&self->inode->data, buffer, remaining, offset);
         if (unlikely(error)) return error;
     }
 
@@ -275,11 +275,11 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
     if (end_offset > self->inode->size) {
         int error = self->inode->ops->regular.truncate(self->inode, end_offset);
         if (unlikely(error)) return error;
-        pgcache_resize(&self->inode->regular, end_offset);
+        pgcache_resize(&self->inode->data, end_offset);
     }
 
     if (remaining) {
-        int error = pgcache_write(&self->inode->regular, buffer, remaining, offset);
+        int error = pgcache_write(&self->inode->data, buffer, remaining, offset);
         if (unlikely(error)) return error;
     }
 
@@ -1078,7 +1078,7 @@ int vfs_chdir(file_t *file) {
     file_t *old = current->process->cwd;
     file_ref(file);
     current->process->cwd = file;
-    file_deref(old);
+    if (old) file_deref(old);
 
     return 0;
 }
@@ -1190,7 +1190,7 @@ static int truncate_inode(inode_t *inode, off_t size) {
     int error = inode->ops->regular.truncate(inode, size);
     if (unlikely(error)) return error;
 
-    pgcache_resize(&inode->regular, size);
+    pgcache_resize(&inode->data, size);
     return 0;
 }
 

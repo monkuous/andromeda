@@ -86,7 +86,7 @@ static void mount_initrd() {
     file_t *file;
     int error = vfs_open(&file, nullptr, "/boot/andromed.img", 18, O_RDONLY, 0);
     if (unlikely(error)) panic("failed to open initrd at /boot/andromed.img (%d)", error);
-    error = create_loopback(&loopback_dev, file);
+    error = create_loopback(&loopback_dev, file, 512);
     file_deref(file);
     if (unlikely(error)) panic("failed to create initrd loopback device (%d)", error);
 
