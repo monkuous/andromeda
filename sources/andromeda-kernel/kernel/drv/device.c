@@ -1,6 +1,7 @@
 #include "device.h"
 #include "compiler.h"
 #include "drv/biosdisk.h"
+#include "drv/loopback.h"
 #include "fs/pgcache.h"
 #include "fs/vfs.h"
 #include "mem/pmem.h"
@@ -14,6 +15,7 @@
 bdev_t *resolve_bdev(dev_t device) {
     switch (device >> 32) {
     case DRIVER_BIOSDISK: return resolve_biosdisk(device);
+    case DRIVER_LOOPBACK: return resolve_loopback(device);
     default: return nullptr;
     }
 }

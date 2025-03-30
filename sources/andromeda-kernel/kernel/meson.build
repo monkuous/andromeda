@@ -8,6 +8,7 @@ kernel_elf = executable(
     'drv/biosdisk.c',
     'drv/device.c',
     'drv/idle.c',
+    'drv/loopback.c',
     'fs/detect.c',
     'fs/fat.c',
     'fs/pgcache.c',

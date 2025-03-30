@@ -294,7 +294,7 @@ static const file_ops_t regular_file_ops = {
         .write = regular_write,
 };
 
-static int access_file(file_t *file, int amode) {
+int access_file(file_t *file, int amode) {
     int avail;
 
     switch (file->flags & O_ACCMODE) {
@@ -932,6 +932,8 @@ exit_early:
 }
 
 int vfs_mount(file_t *rel, const void *path, size_t length, mount_func_t fsf, void *ctx) {
+    if (current->process->euid) return EPERM;
+
     dentry_t *entry;
     int error = fresolve(&entry, rel, path, length, 0);
     if (unlikely(error)) return error;
@@ -967,13 +969,80 @@ exit:
     return error;
 }
 
+static bool is_fs_ancestor(fs_t *a, fs_t *b) {
+    while (b) {
+        if (a == b) return true;
+
+        b = b->mountpoint->filesystem;
+    }
+
+    return false;
+}
+
+int vfs_mvmount(file_t *srel, const void *spath, size_t slen, file_t *drel, const void *dpath, size_t dlen) {
+    if (current->process->euid) return EPERM;
+
+    dentry_t *sentry;
+    int error = fresolve(&sentry, srel, spath, slen, 0);
+    if (unlikely(error)) return error;
+
+    if (unlikely(sentry->parent) || unlikely(!sentry->filesystem)) {
+        error = EINVAL;
+        goto early_exit;
+    }
+
+    dentry_t *dentry;
+    error = fresolve(&dentry, drel, dpath, dlen, 0);
+    if (unlikely(error)) goto early_exit;
+
+    if (unlikely(!dentry->inode)) {
+        error = ENOENT;
+        goto exit;
+    }
+
+    if (unlikely(!S_ISDIR(dentry->inode->mode))) {
+        error = ENOTDIR;
+        goto exit;
+    }
+
+    if (unlikely(dentry->mounted_fs)) {
+        error = EBUSY;
+        goto exit;
+    }
+
+    if (is_fs_ancestor(sentry->filesystem, dentry->filesystem)) {
+        error = EINVAL;
+        goto exit;
+    }
+
+    sentry->filesystem->mountpoint->mounted_fs = nullptr;
+    sentry->filesystem->mountpoint = dentry;
+    dentry->mounted_fs = sentry->filesystem;
+
+    dentry_deref(sentry);
+    dentry_ref(dentry);
+
+exit:
+    dentry_deref(dentry);
+early_exit:
+    dentry_deref(sentry);
+    return error;
+}
+
 int vfs_unmount(file_t *rel, const void *path, size_t length) {
+    if (current->process->euid) return EPERM;
+
     dentry_t *entry;
     int error = fresolve(&entry, rel, path, length, 0);
     if (unlikely(error)) return error;
 
     if (unlikely(entry->parent) || unlikely(!entry->filesystem)) {
         error = EINVAL;
+        goto exit;
+    }
+
+    if (unlikely(entry->mounted_fs)) {
+        error = EBUSY;
         goto exit;
     }
 
@@ -1018,10 +1087,12 @@ int vfs_chroot(file_t *file) {
     if (current->process->euid) return EPERM;
     if (unlikely(!file->path || !S_ISDIR(file->inode->mode))) return ENOTDIR;
 
-    file_t *old = current->process->root;
-    file_ref(file);
+    file_deref(current->process->cwd);
+    if (current->process->root) file_deref(current->process->root);
+    current->process->cwd = file;
     current->process->root = file;
-    file_deref(old);
+    file_ref(file);
+    file_ref(file);
 
     return 0;
 }

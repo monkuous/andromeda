@@ -3,6 +3,7 @@
 #include "cpu/idt.h"
 #include "drv/biosdisk.h"
 #include "drv/device.h"
+#include "drv/loopback.h"
 #include "fs/detect.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
@@ -16,6 +17,8 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 static void init_video() {
     // ensure video mode is 3 (80x25 color text)
@@ -48,6 +51,12 @@ static void init_vfs() {
 
     error = vfs_mknod(nullptr, "dev", 3, S_IFDIR | 0755, 0);
     if (unlikely(error)) panic("failed to create /dev (%d)", error);
+
+    error = vfs_mount(nullptr, "dev", 3, ramfs_create, &ramfs_ctx);
+    if (unlikely(error)) panic("failed to mount /dev (%d)", error);
+
+    error = vfs_mknod(nullptr, "realroot", 8, S_IFDIR | 0755, 0);
+    if (unlikely(error)) panic("failed to create /realroot (%d)", error);
 }
 
 static dev_t get_boot_volume() {
@@ -71,18 +80,57 @@ static void mount_boot() {
     if (unlikely(error)) panic("failed to mount /boot (%d)", error);
 }
 
+static void mount_initrd() {
+    dev_t loopback_dev;
+
+    file_t *file;
+    int error = vfs_open(&file, nullptr, "/boot/andromed.img", 18, O_RDONLY, 0);
+    if (unlikely(error)) panic("failed to open initrd at /boot/andromed.img (%d)", error);
+    error = create_loopback(&loopback_dev, file);
+    file_deref(file);
+    if (unlikely(error)) panic("failed to create initrd loopback device (%d)", error);
+
+    error = vfs_mknod(nullptr, "/dev/initrd", 11, S_IFBLK | 0600, loopback_dev);
+    if (unlikely(error)) panic("failed to create initrd device file (%d)", error);
+
+    bdev_t *bdev = resolve_bdev(loopback_dev);
+    if (unlikely(!bdev)) panic("failed to resolve loopback device");
+
+    error = vfs_mount(nullptr, "/realroot", 9, fsdetect, bdev);
+    if (unlikely(error)) panic("failed to mount initrd (%d)", error);
+}
+
+static void chroot_to_initrd() {
+    int error = vfs_mvmount(nullptr, "/boot", 5, nullptr, "/realroot/boot", 14);
+    if (unlikely(error)) panic("failed to move /boot (%d)", error);
+
+    error = vfs_mvmount(nullptr, "/dev", 4, nullptr, "/realroot/dev", 13);
+    if (unlikely(error)) panic("failed to move /dev (%d)", error);
+
+    file_t *file;
+    error = vfs_open(&file, nullptr, "/realroot", 9, O_RDONLY | O_DIRECTORY, 0);
+    if (unlikely(error)) panic("failed to open /realroot (%d)", error);
+
+    error = vfs_chroot(file);
+    if (unlikely(error)) panic("failed to chroot to initrd (%d)", error);
+
+    file_deref(file);
+}
+
 [[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
     init_pmap();
     init_gdt();
     init_idt();
     init_video();
-    printk("\nStarting Andromeda...\n");
+    printk("\nStarting Andromeda...\n\n");
     detect_memory();
     bootmem_handover();
     init_proc();
     init_vfs();
     init_biosdisk(boot_drive, boot_lba);
     mount_boot();
+    mount_initrd();
+    chroot_to_initrd();
 
     panic("TODO");
 }

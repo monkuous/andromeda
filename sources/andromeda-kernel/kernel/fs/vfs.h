@@ -140,6 +140,7 @@ void init_inode(fs_t *fs, inode_t *inode);
 void init_new_inode(fs_t *fs, inode_t *parent, inode_t *inode, mode_t mode, dev_t device);
 
 int access_inode(inode_t *inode, int amode, bool real);
+int access_file(file_t *file, int amode);
 
 inode_t *create_anonymous_inode(mode_t mode, dev_t device);
 int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags);
@@ -153,6 +154,7 @@ int vfs_unlink(file_t *rel, const void *path, size_t length, int flags);
 int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const void *target, size_t tlen);
 
 int vfs_mount(file_t *rel, const void *path, size_t length, mount_func_t fs, void *ctx);
+int vfs_mvmount(file_t *srel, const void *spath, size_t slen, file_t *drel, const void *dpath, size_t dlen);
 int vfs_unmount(file_t *rel, const void *path, size_t length);
 int vfs_chdir(file_t *file);
 int vfs_chroot(file_t *file);

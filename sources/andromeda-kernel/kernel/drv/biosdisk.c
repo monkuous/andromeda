@@ -202,10 +202,14 @@ static bool process_drive(uint8_t id, uint64_t boot_lba) {
     bdev->base.id = DEVICE_ID(DRIVER_BIOSDISK, minor);
     bdev->drive = id;
 
-    unsigned char name_buffer[32];
-    size_t name_length = snprintk(name_buffer, sizeof(name_buffer), "/dev/disk%u", minor);
+    unsigned char path_buffer[32];
+    size_t path_length = snprintk(path_buffer, sizeof(path_buffer), "/dev/disk%u", minor);
 
-    int error = vfs_mknod(nullptr, name_buffer, name_length, S_IFBLK | 0644, bdev->base.id);
+    // remove the /dev/ prefix when relative is necessary
+    unsigned char *name_buffer = &path_buffer[5];
+    size_t name_length = path_length - 5;
+
+    int error = vfs_mknod(nullptr, path_buffer, path_length, S_IFBLK | 0600, bdev->base.id);
     if (unlikely(error)) panic("biosdisk: mknod failed (%d)", error);
 
     if (boot_lba != UINT64_MAX) {

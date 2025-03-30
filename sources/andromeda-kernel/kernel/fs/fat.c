@@ -3,6 +3,7 @@
 #include "drv/device.h"
 #include "fs/pgcache.h"
 #include "fs/vfs.h"
+#include "mem/pmap.h"
 #include "mem/pmem.h"
 #include "mem/vmalloc.h"
 #include "string.h"
@@ -25,9 +26,10 @@ typedef struct {
     flat_pgcache_t data;
     flat_pgcache_t root;
     uint64_t root_size;
-    int fat_entry_size; // 3 means 12 bits
+    int fat_entry_size; // 1 means 12 bits
     int cluster_block_shift;
     uint64_t data_block;
+    size_t cluster_size;
 } fatfs_t;
 
 typedef struct {
@@ -64,8 +66,8 @@ typedef struct [[gnu::packed, gnu::aligned(4)]] {
 
 static uint32_t extend_cluster(fatfs_t *fs, uint32_t value) {
     switch (fs->fat_entry_size) {
+    case 1: return value | (value >= 0xff7 ? 0xfffff000 : 0);
     case 2: return value | (value >= 0xfff7 ? 0xffff0000 : 0);
-    case 3: return value | (value >= 0xff7 ? 0xfffff000 : 0);
     case 4: return value | (value >= 0xffffff7 ? 0xf0000000 : 0);
     default: UNREACHABLE(); break;
     }
@@ -73,11 +75,20 @@ static uint32_t extend_cluster(fatfs_t *fs, uint32_t value) {
 
 static int next_cluster(fatfs_t *fs, uint32_t *cluster) {
     uint32_t prev = *cluster;
+
+    size_t size = fs->fat_entry_size;
+    uint64_t offset = prev * fs->fat_entry_size;
+
+    if (fs->fat_entry_size == 1) {
+        offset += prev >> 1;
+        size += 1;
+    }
+
     uint32_t value = 0;
-    int error = pgcache_read(&fs->fat.base, &value, fs->fat_entry_size & ~1, fs->fat_entry_size * prev);
+    int error = pgcache_read(&fs->fat.base, &value, size, offset);
     if (unlikely(error)) return error;
 
-    if (fs->fat_entry_size == 3) {
+    if (fs->fat_entry_size == 1) {
         if (prev & 1) value >>= 4;
         else value &= 0xfff;
     }
@@ -89,7 +100,7 @@ static int next_cluster(fatfs_t *fs, uint32_t *cluster) {
 static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
     fat_inode_t *inode = container(fat_inode_t, base.regular, self);
     fatfs_t *fs = (fatfs_t *)inode->base.filesystem;
-    uint32_t clust_size = fs->base.block_size;
+    uint32_t clust_size = fs->cluster_size;
 
     if (idx < inode->cur.idx || (idx == inode->cur.idx && inode->cur.offset != 0)) {
         inode->cur.cluster = inode->cluster;
@@ -112,9 +123,14 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
     uint32_t phys = page_to_phys(page);
 
     while (inode->cur.offset < PAGE_SIZE) {
+        if (inode->cur.cluster >= 0xffffff8) {
+            memset(pmap_tmpmap(phys) + inode->cur.offset, 0, PAGE_SIZE - inode->cur.offset);
+            return 0;
+        }
+
         int error = fs->device->ops->rphys(
                 fs->device,
-                phys,
+                phys + inode->cur.offset,
                 fs->data_block + ((inode->cur.cluster - 2) << fs->cluster_block_shift),
                 1ul << fs->cluster_block_shift
         );
@@ -123,7 +139,6 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
         error = next_cluster(fs, &inode->cur.cluster);
         if (unlikely(error)) return error;
 
-        phys += clust_size;
         inode->cur.offset += clust_size;
     }
 
@@ -136,6 +151,8 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
 static const pgcache_ops_t fat_pgcache_ops = {
         .read_page = fat_pgcache_read_page,
 };
+
+static const file_ops_t fat_dir_ops;
 
 static void fat_inode_free(inode_t *ptr) {
     fat_inode_t *self = (fat_inode_t *)ptr;
@@ -215,7 +232,7 @@ static int dirino_init(fatfs_t *fs, fat_inode_t *inode) {
         uint64_t clust_size;
 
         if (cluster >= 2) {
-            clust_size = fs->base.block_size;
+            clust_size = fs->cluster_size;
             base_offset = (cluster - 2) * clust_size;
         } else {
             clust_size = fs->root_size;
@@ -259,12 +276,13 @@ static int create_inode(inode_t **out, fatfs_t *fs, fat_dirent_t *entry, ino_t i
     inode->base.ops = &fat_inode_ops;
     inode->base.ino = ino;
 
-    inode->cluster = entry->cluster_low | ((uint32_t)entry->cluster_high << 16);
+    inode->cluster = extend_cluster(fs, entry->cluster_low | ((uint32_t)entry->cluster_high << 16));
     inode->cur.cluster = inode->cluster;
 
     if (entry->attr & DENT_DIRECTORY) {
         inode->base.mode = S_IFDIR | 0755;
         inode->base.nlink = 2;
+        inode->base.directory = &fat_dir_ops;
 
         int error = dirino_init(fs, inode);
         if (unlikely(error)) {
@@ -317,7 +335,7 @@ static int fat_inode_lookup(inode_t *ptr, dentry_t *entry) {
 
         if (cluster >= 2) {
             ino_offset = 0;
-            clust_size = fs->base.block_size;
+            clust_size = fs->cluster_size;
             base_offset = (cluster - 2) * clust_size;
             cache = &fs->data.base;
         } else {
@@ -461,7 +479,7 @@ int fat_create(fs_t **out, void *ctx) {
     uint64_t root_size = ((uint32_t)bpb->root_size * 32 + (bpb->sector_size - 1)) / bpb->sector_size;
     uint64_t data_offset = root_offset + root_size;
 
-    if ((!is_fat32 && root_size) || data_offset >= sectors) {
+    if ((is_fat32 && root_size) || data_offset >= sectors) {
         error = EINVAL;
         goto exit;
     }
@@ -492,12 +510,13 @@ int fat_create(fs_t **out, void *ctx) {
     fs->base.ops = &fatfs_ops;
     fs->base.device = dev->id;
     fs->base.flags = ST_RDONLY;
-    fs->base.block_size = cluster_size;
+    fs->base.block_size = bpb->sector_size;
     fs->base.max_name_len = 8; // TODO: VFAT
     fs->base.blocks = data_clusters;
     fs->device = dev;
     fs->cluster_block_shift = __builtin_ctz(cluster_size) - dev->block_shift;
     fs->data_block = (data_offset * bpb->sector_size) >> dev->block_shift;
+    fs->cluster_size = cluster_size;
 
     init_flat_pgcache(&fs->fat, dev, fat_offset * bpb->sector_size, fat_size * bpb->sector_size);
     init_flat_pgcache(&fs->data, dev, data_offset * bpb->sector_size, (uint64_t)data_clusters * cluster_size);
@@ -509,7 +528,7 @@ int fat_create(fs_t **out, void *ctx) {
     if (!is_fat32) {
         fs->root_size = root_size * bpb->sector_size;
         init_flat_pgcache(&fs->root, dev, root_offset * bpb->sector_size, fs->root_size);
-        fs->fat_entry_size = 2 + (data_clusters < 4085);
+        fs->fat_entry_size = 1 + (data_clusters >= 4085);
     } else {
         fs->fat_entry_size = 4;
         root_dirent.cluster_low = bpb->fat32.root_cluster;

@@ -7,6 +7,7 @@
 
 #define DRIVER_PSEUDO_FS 0
 #define DRIVER_BIOSDISK 1
+#define DRIVER_LOOPBACK 2
 
 #define DEVICE_ID(driver, id) (((dev_t)(driver) << 32) | (id))
 

@@ -11,6 +11,8 @@
 static ino_t ramfs_ino;
 static const inode_ops_t ramfs_inode_ops;
 
+static const file_ops_t ramfs_dir_ops;
+
 static void ramfs_inode_free(inode_t *self) {
     vmfree(self, sizeof(*self));
 }
@@ -72,7 +74,10 @@ static int ramfs_inode_dir_create(inode_t *self, dentry_t *entry, mode_t mode, d
     entry->inode = inode;
     inode->nlink += 1;
 
-    if (S_ISDIR(mode)) self->nlink += 1;
+    if (S_ISDIR(mode)) {
+        self->nlink += 1;
+        self->directory = &ramfs_dir_ops;
+    }
 
     dentry_ref(entry); // keep it around
     return 0;
@@ -141,6 +146,7 @@ int ramfs_create(fs_t **out, void *ptr) {
     memset(root, 0, sizeof(*root));
     root->ops = &ramfs_inode_ops;
     root->ino = ramfs_ino++;
+    root->directory = &ramfs_dir_ops;
     init_new_inode(fs, nullptr, root, S_IFDIR | ctx->mode, 0);
 
     init_fs(fs, root);
