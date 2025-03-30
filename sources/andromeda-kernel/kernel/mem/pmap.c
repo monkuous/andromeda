@@ -2,6 +2,7 @@
 #include "mem/layout.h"
 #include "mem/pmem.h"
 #include "util/panic.h"
+#include "string.h"
 #include <stdint.h>
 
 #define PTE_PRESENT (1u << 0)
@@ -29,6 +30,47 @@ void init_pmap() {
     temp_map_pte = (uint32_t *)(PTBL_VIRT_BASE | ((uintptr_t)temp_map_page >> 10));
 }
 
+static void ensure_pt_present(uint32_t *pd, uint32_t pdi) {
+    if (!pd[pdi]) {
+        pd[pdi] = pmem_alloc_simple() | TABLE_FLAGS;
+        memset((uint32_t *)(PTBL_VIRT_BASE | (pdi << 12)), 0, 0x1000);
+    }
+}
+
+void pmap_map(uintptr_t virt, uint32_t phys, size_t size, uint32_t flags) {
+    ASSERT(!((virt | phys | size) & PAGE_MASK));
+    ASSERT(virt >= KERN_VIRT_BASE);
+
+    uintptr_t tail = virt + (size - 1);
+    ASSERT(virt < tail);
+    ASSERT(tail < PTBL_VIRT_BASE);
+
+    flags |= PTE_DIRTY | PTE_ACCESSED | PTE_WRITABLE | PTE_PRESENT;
+
+    uint32_t pdi = (virt >> 22) & 1023;
+    uint32_t pti = (virt >> 12) & 1023;
+
+    uint32_t pdi_end = (tail >> 22) & 1023;
+    uint32_t pti_end = 1023;
+
+    uint32_t *table = (uint32_t *)(PTBL_VIRT_BASE | (pdi << 12)) + pti;
+
+    while (pdi <= pdi_end) {
+        if (pdi == pdi_end) pti_end = (tail >> 12) & 1023;
+        ensure_pt_present(kernel_page_dir, pdi);
+
+        while (pti <= pti_end) {
+            ASSERT(*table == 0);
+            *table++ = phys | flags;
+            pti++;
+            phys += 0x1000;
+        }
+
+        pdi++;
+        pti = 0;
+    }
+}
+
 void pmap_alloc(uintptr_t virt, size_t size, uint32_t flags) {
     ASSERT(!((virt | size) & PAGE_MASK));
     ASSERT(virt >= KERN_VIRT_BASE);
@@ -49,7 +91,7 @@ void pmap_alloc(uintptr_t virt, size_t size, uint32_t flags) {
 
     while (pdi <= pdi_end) {
         if (pdi == pdi_end) pti_end = (tail >> 12) & 1023;
-        if (!kernel_page_dir[pdi]) kernel_page_dir[pdi] = pmem_alloc_simple() | TABLE_FLAGS;
+        ensure_pt_present(kernel_page_dir, pdi);
 
         while (pti <= pti_end) {
             ASSERT(*table == 0);
@@ -108,8 +150,10 @@ void pmap_unmap(uintptr_t virt, size_t size) {
     }
 }
 
-void *pmap_tmpmap(page_t *page) {
-    uint32_t pte = page_to_phys(page) | PTE_DIRTY | PTE_ACCESSED | PTE_WRITABLE | PTE_PRESENT;
+void *pmap_tmpmap(uint32_t phys) {
+    ASSERT(!(phys & PAGE_MASK));
+
+    uint32_t pte = phys | PTE_DIRTY | PTE_ACCESSED | PTE_WRITABLE | PTE_PRESENT;
 
     if (pte != *temp_map_pte) {
         *temp_map_pte = pte;

@@ -3,6 +3,7 @@
 #include "fs/pgcache.h"
 #include "mem/bootmem.h"
 #include "mem/layout.h"
+#include "string.h"
 #include "util/panic.h"
 #include <stdint.h>
 
@@ -33,14 +34,17 @@ page_t *pmem_alloc(bool cache) {
     page_t *page = free_pages;
     size_t idx = --page->free.count;
     if (likely(!idx)) free_pages = page->free.next;
+    page += idx;
+    page->is_free = false;
 
     if (cache) pmem_stats.cache += 1;
     else pmem_stats.alloc += 1;
 
-    return page + idx;
+    return page;
 }
 
 void pmem_free(page_t *page, bool cache) {
+    page->is_free = true;
     page->free.count = 1;
     page->free.next = free_pages;
     free_pages = page;
@@ -68,6 +72,7 @@ static void do_add(uint32_t head, uint32_t tail) {
     size_t count = ((tail - head) >> PAGE_SHIFT) + 1;
 
     page_t *page = phys_to_page(head);
+    memset(page, 0xff, count * sizeof(*page)); // set is_free to 1 for all pages in this region
     page->free.count = count;
     page->free.next = free_pages;
     free_pages = page;
@@ -102,4 +107,79 @@ void pmem_add_region(uint32_t head, uint32_t tail, uint32_t alloc_tail) {
     }
 
     do_add(head, tail);
+}
+
+struct alloc_slow_ctx {
+    union {
+        uint32_t offset;
+        page_t *page;
+    };
+    uint32_t max_tail;
+};
+
+static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, void *ptr) {
+    if (type != MEM_USABLE) return true;
+    if (tail < PAGE_MASK) return true;
+    tail = (tail - PAGE_MASK) | PAGE_MASK;
+
+    struct alloc_slow_ctx *ctx = ptr;
+
+    if (tail < ctx->offset) return true;
+    if (tail > ctx->max_tail) tail = ctx->max_tail;
+
+    uint32_t alloc_head = tail - ctx->offset;
+    uint32_t count = (ctx->offset >> PAGE_SHIFT) + 1;
+
+    while (head <= alloc_head) {
+        page_t *base = phys_to_page(alloc_head);
+        uint32_t i;
+
+        for (i = count; i > 0; i--) {
+            page_t *page = &base[i - 1];
+
+            if (!page->is_free) {
+                uint32_t new_alloc_tail = page_to_phys(page) - 1;
+                if (new_alloc_tail < ctx->offset) return true;
+                alloc_head = new_alloc_tail - ctx->offset;
+                break;
+            }
+        }
+
+        if (i) continue;
+
+        memset(base, 0, count); // set is_free to 0 for all pages
+        pmem_stats.alloc += count;
+
+        ctx->page = base;
+        return false;
+    }
+
+    return true;
+}
+
+page_t *pmem_alloc_slow(size_t count, uint32_t max_addr) {
+    if (!count) return page_array;
+
+    if (max_addr < PAGE_MASK) return nullptr;
+    max_addr = (max_addr - PAGE_MASK) | PAGE_MASK;
+
+    uint32_t offset = ((count - 1) << PAGE_SHIFT) | PAGE_MASK;
+    if (max_addr < offset) return nullptr;
+
+    struct alloc_slow_ctx ctx = {
+            .offset = offset,
+            .max_tail = max_addr,
+    };
+
+    return !bootmem_iter(alloc_slow_func, &ctx, true) ? ctx.page : nullptr;
+}
+
+void pmem_free_multiple(page_t *pages, size_t count) {
+    if (!count) return;
+
+    memset(pages, 0, count * sizeof(*pages)); // set is_free to 1 for all pages
+    pages->free.count = count;
+    pages->free.next = free_pages;
+    free_pages = pages;
+    pmem_stats.alloc -= count;
 }

@@ -11,7 +11,6 @@
 #include "string.h"
 #include "util/hash.h"
 #include "util/panic.h"
-#include <abi-bits/statvfs.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -261,7 +260,7 @@ static int regular_read(file_t *self, void *buffer, size_t *size, uint64_t offse
 
         // TODO: Use user_{memcpy,memset}
         if (page) {
-            memcpy(buffer, pmap_tmpmap(page) + pgoff, cursz);
+            memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cursz);
         } else {
             memset(buffer, 0, cursz);
         }
@@ -308,7 +307,7 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
         if (unlikely(error)) return error;
 
         // TODO: Use user_memcpy
-        memcpy(pmap_tmpmap(page) + pgoff, buffer, cursz);
+        memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cursz);
 
         buffer += cursz;
         offset += cursz;
@@ -1212,6 +1211,7 @@ static ssize_t do_rw_op(
         bool update_pos
 ) {
     if (unlikely(!size)) return 0;
+    if (unlikely(offset < 0)) return -EINVAL;
     if (unlikely(!func)) return -ENOSYS;
 
     int error = access_file(file, amode);

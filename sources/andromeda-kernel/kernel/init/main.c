@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
+#include "drv/biosdisk.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
 #include "init/bios.h"
@@ -46,7 +47,20 @@ static void init_vfs() {
     if (unlikely(error)) panic("failed to create /dev (%d)", error);
 }
 
-[[noreturn, gnu::used]] void kernel_main([[maybe_unused]] uint64_t boot_lba, [[maybe_unused]] uint8_t boot_drive) {
+static dev_t get_boot_volume() {
+    file_t *file;
+    int error = vfs_open(&file, nullptr, "/dev/bootvol", 12, O_RDONLY, 0);
+    if (unlikely(error)) panic("failed to open boot volume (%d)", error);
+    struct stat stat;
+    error = vfs_fstat(file, &stat);
+    file_deref(file);
+    if (unlikely(error)) panic("failed to stat boot volume (%d)", error);
+
+    ASSERT(S_ISBLK(stat.st_mode));
+    return stat.st_rdev;
+}
+
+[[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
     init_gdt();
     init_idt();
     init_video();
@@ -55,6 +69,9 @@ static void init_vfs() {
     bootmem_handover();
     init_proc();
     init_vfs();
+    init_biosdisk(boot_drive, boot_lba);
+
+    get_boot_volume();
 
     panic("TODO");
 }

@@ -232,6 +232,9 @@ void bootmem_handover() {
         pmap_alloc(parr_vhead_aligned, parr_vtail_aligned - parr_vhead_aligned + 1, PMAP_WRITABLE);
     }
 
+    // set is_free to 0 for all pages
+    memset((void *)parr_vhead, 0, parr_size);
+
     max_alloc_idx = 0; // disable bootmem_alloc
     page_array = (page_t *)parr_vhead - page_base;
 
@@ -243,4 +246,22 @@ void bootmem_handover() {
     }
 
     vmem_add_range(parr_vtail_aligned + 1, PTBL_VIRT_BASE - 1);
+}
+
+bool bootmem_iter(bool (*func)(uint64_t head, uint64_t tail, memory_type_t type, void *ctx), void *ctx, bool reverse) {
+    if (!reverse) {
+        for (size_t i = 0; i < mmap_count; i++) {
+            mem_region_t *region = &memory_map[i];
+
+            if (!func(region->head, region->tail, region->type, ctx)) return false;
+        }
+    } else {
+        for (size_t i = mmap_count; i > 0; i--) {
+            mem_region_t *region = &memory_map[i - 1];
+
+            if (!func(region->head, region->tail, region->type, ctx)) return false;
+        }
+    }
+
+    return true;
 }

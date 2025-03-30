@@ -18,8 +18,13 @@ static bool detect_e820() {
     bool success = false;
 
     do {
-        regs_t regs = {.eax = 0xe820, .ebx = key, .ecx = sizeof(buf), .edx = E820_MAGIC};
-        lin_to_seg(KERN_TO_PHYS((uintptr_t)&buf), &regs.es, &regs.edi);
+        regs_t regs = {
+                .eax = 0xe820,
+                .ebx = key,
+                .ecx = sizeof(buf),
+                .edx = E820_MAGIC,
+                .edi = KERN_TO_PHYS((uintptr_t)&buf),
+        };
         intcall(0x15, &regs);
         if ((regs.eflags & 1) != 0 || regs.eax != E820_MAGIC) break;
         success = true;

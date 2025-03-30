@@ -21,9 +21,9 @@ typedef struct {
 
 void intcall(uint8_t vector, regs_t *regs);
 
-static inline void lin_to_seg(uint32_t phys, uint16_t *seg, uint32_t *off) {
+static inline uint16_t lin_to_seg(uint32_t phys, uint16_t *seg) {
     ASSERT(phys < 0x100000);
 
     *seg = phys >> 4;
-    *off = phys & 15;
+    return phys & 15;
 }

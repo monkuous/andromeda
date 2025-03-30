@@ -8,17 +8,20 @@
 #define PAGE_SIZE (1ul << PAGE_SHIFT)
 #define PAGE_MASK (PAGE_SIZE - 1)
 
-typedef union page {
-    struct {
-        union page *next;
-        size_t count;
-    } free;
-    struct {
-        list_node_t lru_node;
-        struct pgcache *cache;
-        uint64_t index;
-    } cache;
-} __attribute__((aligned(32))) page_t;
+typedef struct [[gnu::aligned(32)]] page {
+    bool is_free : 1;
+    union {
+        struct {
+            struct page *next;
+            size_t count;
+        } free;
+        struct {
+            list_node_t lru_node;
+            struct pgcache *cache;
+            uint64_t index;
+        } cache;
+    };
+} page_t;
 
 typedef struct {
     uint32_t total;
@@ -32,6 +35,9 @@ extern pmem_stats_t pmem_stats;
 uint32_t pmem_alloc_simple();
 page_t *pmem_alloc(bool cache);
 void pmem_free(page_t *page, bool cache);
+
+page_t *pmem_alloc_slow(size_t count, uint32_t max_addr);
+void pmem_free_multiple(page_t *pages, size_t count);
 
 void pmem_add_region(uint32_t head, uint32_t tail, uint32_t alloc_tail);
 

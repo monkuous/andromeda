@@ -89,6 +89,8 @@ static int ramfs_inode_dir_symlink(inode_t *self, dentry_t *entry, const void *t
     }
 
     entry->inode->symlink = buffer;
+    entry->inode->size = length;
+
     return 0;
 }
 

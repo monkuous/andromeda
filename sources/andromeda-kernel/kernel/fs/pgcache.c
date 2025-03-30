@@ -101,7 +101,7 @@ int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create
 
             lru_add(page);
         } else {
-            memset(pmap_tmpmap(page), 0, PAGE_SIZE);
+            memset(pmap_tmpmap(page_to_phys(page)), 0, PAGE_SIZE);
         }
     }
 

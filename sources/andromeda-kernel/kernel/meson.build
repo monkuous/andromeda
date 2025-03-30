@@ -5,6 +5,7 @@ kernel_elf = executable(
     'cpu/gdt.c',
     'cpu/idt.c',
     'cpu/idt.S',
+    'drv/biosdisk.c',
     'drv/device.c',
     'drv/idle.c',
     'fs/pgcache.c',
