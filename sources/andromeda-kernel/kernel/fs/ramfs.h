@@ -6,4 +6,4 @@ struct ramfs_create_ctx {
     mode_t mode;
 };
 
-fs_t *ramfs_create(void *ctx);
+int ramfs_create(fs_t **out, void *ctx);

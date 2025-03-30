@@ -76,6 +76,11 @@ static int do_read(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
 }
 
 static int biosdisk_rvirt(bdev_t *ptr, void *buffer, uint64_t block, size_t count) {
+    if (!count) return 0;
+
+    uint64_t tail = block + (count - 1);
+    if (tail < block || tail >= ptr->blocks) return ENXIO;
+
     size_t page_blocks = PAGE_SIZE >> ptr->block_shift;
 
     while (count) {
@@ -96,6 +101,11 @@ static int biosdisk_rvirt(bdev_t *ptr, void *buffer, uint64_t block, size_t coun
 }
 
 static int biosdisk_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
+    if (!count) return 0;
+
+    uint64_t tail = block + (count - 1);
+    if (tail < block || tail >= ptr->blocks) return ENXIO;
+
     if (phys < 0x100000) {
         size_t direct_blocks = (0x100000 - phys) >> ptr->block_shift;
 
@@ -128,7 +138,7 @@ static int biosdisk_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t cou
             uint32_t pgrem = PAGE_SIZE - pgoff;
             uint32_t ncopy = pgrem < cur_bytes ? pgrem : cur_bytes;
 
-            memcpy(pmap_tmpmap(phys) + pgoff, copy_src, ncopy);
+            memcpy(pmap_tmpmap(phys & ~PAGE_MASK) + pgoff, copy_src, ncopy);
 
             phys += ncopy;
             copy_src += ncopy;
@@ -187,12 +197,13 @@ static bool process_drive(uint8_t id, uint64_t boot_lba) {
     bdev->base.ops = &bios_bdev_ops;
     bdev->base.blocks = params.blocks;
     bdev->base.block_shift = __builtin_ctz(params.block_size);
+    bdev->base.id = DEVICE_ID(DRIVER_BIOSDISK, minor);
     bdev->drive = id;
 
     unsigned char name_buffer[32];
     size_t name_length = snprintk(name_buffer, sizeof(name_buffer), "/dev/disk%u", minor);
 
-    int error = vfs_mknod(nullptr, name_buffer, name_length, S_IFBLK | 0644, DEVICE_ID(DRIVER_BIOSDISK, minor));
+    int error = vfs_mknod(nullptr, name_buffer, name_length, S_IFBLK | 0644, bdev->base.id);
     if (unlikely(error)) panic("biosdisk: mknod failed (%d)", error);
 
     if (boot_lba != UINT64_MAX) {

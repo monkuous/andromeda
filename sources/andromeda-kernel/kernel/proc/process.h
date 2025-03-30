@@ -103,7 +103,7 @@ int setresuid(uid_t ruid, uid_t euid, uid_t suid);
 int setgid(gid_t gid);
 int setuid(uid_t uid);
 
-relation_t get_relation(uid_t uid, gid_t gid);
+relation_t get_relation(uid_t uid, gid_t gid, bool real);
 
 // forks the current process and makes the given thread join the new process
 // the thread must belong to the current process, and must be in THREAD_CREATED

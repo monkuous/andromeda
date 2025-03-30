@@ -126,7 +126,7 @@ static const fs_ops_t ramfs_ops = {
         .free = ramfs_free,
 };
 
-fs_t *ramfs_create(void *ptr) {
+int ramfs_create(fs_t **out, void *ptr) {
     struct ramfs_create_ctx *ctx = ptr;
 
     fs_t *fs = vmalloc(sizeof(*fs));
@@ -145,5 +145,7 @@ fs_t *ramfs_create(void *ptr) {
 
     init_fs(fs, root);
     inode_deref(root);
-    return fs;
+
+    *out = fs;
+    return 0;
 }

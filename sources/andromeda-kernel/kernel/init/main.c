@@ -2,14 +2,18 @@
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
 #include "drv/biosdisk.h"
+#include "drv/device.h"
+#include "fs/detect.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
 #include "init/bios.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
+#include "mem/pmap.h"
 #include "proc/process.h"
 #include "util/panic.h"
 #include "util/print.h"
+#include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/stat.h>
@@ -60,7 +64,16 @@ static dev_t get_boot_volume() {
     return stat.st_rdev;
 }
 
+static void mount_boot() {
+    bdev_t *bdev = resolve_bdev(get_boot_volume());
+    if (unlikely(!bdev)) panic("failed to resolve boot volume");
+
+    int error = vfs_mount(nullptr, "/boot", 5, fsdetect, bdev);
+    if (unlikely(error)) panic("failed to mount /boot (%d)", error);
+}
+
 [[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
+    init_pmap();
     init_gdt();
     init_idt();
     init_video();
@@ -70,8 +83,7 @@ static dev_t get_boot_volume() {
     init_proc();
     init_vfs();
     init_biosdisk(boot_drive, boot_lba);
-
-    get_boot_volume();
+    mount_boot();
 
     panic("TODO");
 }

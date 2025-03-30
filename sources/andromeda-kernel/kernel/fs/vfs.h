@@ -11,8 +11,10 @@ typedef struct file file_t;
 typedef struct fs fs_t;
 typedef struct inode inode_t;
 
+typedef int (*mount_func_t)(fs_t **, void *);
+
 typedef struct {
-    void *data;
+    unsigned char *data;
     size_t length;
     uint32_t hash;
 } dname_t;
@@ -137,7 +139,7 @@ dev_t next_pseudo_fs_device();
 void init_inode(fs_t *fs, inode_t *inode);
 void init_new_inode(fs_t *fs, inode_t *parent, inode_t *inode, mode_t mode, dev_t device);
 
-int access_inode(inode_t *inode, int amode);
+int access_inode(inode_t *inode, int amode, bool real);
 
 inode_t *create_anonymous_inode(mode_t mode, dev_t device);
 int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags);
@@ -150,10 +152,11 @@ int vfs_link(file_t *rel, const void *path, size_t length, file_t *trel, const v
 int vfs_unlink(file_t *rel, const void *path, size_t length, int flags);
 int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const void *target, size_t tlen);
 
-int vfs_mount(file_t *rel, const void *path, size_t length, fs_t *(*fs)(void *), void *);
+int vfs_mount(file_t *rel, const void *path, size_t length, mount_func_t fs, void *ctx);
 int vfs_unmount(file_t *rel, const void *path, size_t length);
 int vfs_chdir(file_t *file);
 
+int vfs_access(file_t *rel, const void *path, size_t length, int amode, int flags);
 int vfs_readlink(file_t *rel, const void *path, size_t length, void *buf, size_t *buf_len);
 int vfs_stat(file_t *rel, const void *path, size_t length, struct stat *out, int flags);
 int vfs_fstat(file_t *file, struct stat *out);

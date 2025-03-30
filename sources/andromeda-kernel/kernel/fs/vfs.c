@@ -3,7 +3,6 @@
 #include "drv/device.h"
 #include "fs/pgcache.h"
 #include "klimits.h"
-#include "mem/pmap.h"
 #include "mem/pmem.h"
 #include "mem/vmalloc.h"
 #include "proc/process.h"
@@ -100,7 +99,7 @@ void dentry_deref(dentry_t *entry) {
             if (entry->inode) inode_deref(entry->inode);
             vmfree(entry, sizeof(*entry));
 
-            if (parent) break;
+            if (!parent) break;
             entry = parent;
         } else {
             break;
@@ -149,6 +148,7 @@ void init_fs(fs_t *fs, inode_t *root) {
     fs->root = vmalloc(sizeof(*fs->root));
     memset(fs->root, 0, sizeof(*fs->root));
     fs->root->references = 1;
+    fs->root->filesystem = fs;
     fs->root->inode = root;
 
     inode_ref(root);
@@ -214,8 +214,8 @@ inode_t *create_anonymous_inode(mode_t mode, dev_t device) {
     return inode;
 }
 
-int access_inode(inode_t *inode, int amode) {
-    if (!amode || !current->process->euid) return 0;
+int access_inode(inode_t *inode, int amode, bool real) {
+    if (!amode || !(real ? current->process->ruid : current->process->euid)) return 0;
 
     mode_t mask = 0;
 
@@ -223,7 +223,7 @@ int access_inode(inode_t *inode, int amode) {
     if (amode & W_OK) mask |= S_IWOTH;
     if (amode & X_OK) mask |= S_IXOTH;
 
-    switch (get_relation(inode->uid, inode->gid)) {
+    switch (get_relation(inode->uid, inode->gid, real)) {
     case REL_OWNER: mask <<= 6; break;
     case REL_GROUP: mask <<= 3; break;
     case REL_OTHER: break;
@@ -247,33 +247,14 @@ static int regular_read(file_t *self, void *buffer, size_t *size, uint64_t offse
     size_t remaining = *size;
     size_t available = offset < self->inode->size ? self->inode->size - offset : 0;
     if (remaining > available) remaining = available;
-    size_t total = 0;
 
-    while (remaining) {
-        size_t pgoff = offset & PAGE_MASK;
-        size_t cursz = PAGE_SIZE - pgoff;
-        if (cursz > remaining) cursz = remaining;
-
-        page_t *page;
-        int error = pgcache_get_page(&self->inode->regular, &page, offset >> PAGE_SHIFT, false);
+    if (remaining) {
+        int error = pgcache_read(&self->inode->regular, buffer, remaining, offset);
         if (unlikely(error)) return error;
-
-        // TODO: Use user_{memcpy,memset}
-        if (page) {
-            memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cursz);
-        } else {
-            memset(buffer, 0, cursz);
-        }
-
-        buffer += cursz;
-        offset += cursz;
-        total += cursz;
-        remaining -= cursz;
     }
 
-    if (update_pos) self->position = offset;
-
-    *size = total;
+    if (update_pos) self->position = offset + remaining;
+    *size = remaining;
     return 0;
 }
 
@@ -297,26 +278,12 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
         pgcache_resize(&self->inode->regular, end_offset);
     }
 
-    while (remaining) {
-        size_t pgoff = offset & PAGE_MASK;
-        size_t cursz = PAGE_SIZE - pgoff;
-        if (cursz > remaining) cursz = remaining;
-
-        page_t *page;
-        int error = pgcache_get_page(&self->inode->regular, &page, offset >> PAGE_SHIFT, true);
+    if (remaining) {
+        int error = pgcache_write(&self->inode->regular, buffer, remaining, offset);
         if (unlikely(error)) return error;
-
-        // TODO: Use user_memcpy
-        memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cursz);
-
-        buffer += cursz;
-        offset += cursz;
-        total += cursz;
-        remaining -= cursz;
     }
 
-    if (update_pos) self->position = offset;
-
+    if (update_pos) self->position = offset + remaining;
     *size = total;
     return 0;
 }
@@ -337,7 +304,7 @@ static int access_file(file_t *file, int amode) {
     default: avail = 0; break;
     }
 
-    return (avail & amode) == amode;
+    return (avail & amode) == amode ? 0 : EACCES;
 }
 
 int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
@@ -354,7 +321,7 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
     case S_IFDIR: file->ops = inode->directory; break;
     case S_IFREG:
         file->ops = &regular_file_ops;
-        if ((flags & O_TRUNC) && access_file(file, W_OK) && inode->size != 0) {
+        if ((flags & O_TRUNC) && !access_file(file, W_OK) && inode->size != 0) {
             error = inode->ops->regular.truncate(inode, 0);
         }
         break;
@@ -455,6 +422,7 @@ static int simple_lookup(dentry_t *dir, const void *name, size_t length, dentry_
         entry = vmalloc(sizeof(*entry));
         memset(entry, 0, sizeof(*entry));
         entry->references = 1;
+        entry->filesystem = dir->filesystem;
         entry->parent = dir;
         entry->name.data = vmalloc(length);
         memcpy(entry->name.data, name, length);
@@ -519,7 +487,7 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
 
         if (!length) break;
 
-        error = access_inode(rel->inode, X_OK);
+        error = access_inode(rel->inode, X_OK, false);
         if (unlikely(error)) {
             dentry_deref(rel);
             return error;
@@ -659,7 +627,7 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
         dentry_t *parent = entry->parent;
         ASSERT(parent);
 
-        error = access_inode(parent->inode, W_OK);
+        error = access_inode(parent->inode, W_OK, false);
         if (unlikely(error)) goto exit;
 
         error = parent->inode->ops->directory.create(parent->inode, entry, mode, 0);
@@ -677,7 +645,7 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
             goto exit;
         }
 
-        error = access_inode(entry->inode, amode);
+        error = access_inode(entry->inode, amode, false);
         if (unlikely(error)) goto exit;
     }
 
@@ -716,7 +684,7 @@ int vfs_mknod(file_t *rel, const void *path, size_t length, mode_t mode, dev_t d
     dentry_t *parent = entry->parent;
     ASSERT(parent);
 
-    error = access_inode(parent->inode, W_OK);
+    error = access_inode(parent->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     error = parent->inode->ops->directory.create(parent->inode, entry, mode, dev);
@@ -736,7 +704,7 @@ int vfs_symlink(file_t *rel, const void *path, size_t length, const void *target
     dentry_t *parent = entry->parent;
     ASSERT(parent);
 
-    error = access_inode(parent->inode, W_OK);
+    error = access_inode(parent->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     error = parent->inode->ops->directory.symlink(parent->inode, entry, target, tlen);
@@ -778,7 +746,7 @@ int vfs_link(file_t *rel, const void *path, size_t length, file_t *trel, const v
     dentry_t *parent = entry->parent;
     ASSERT(parent);
 
-    error = access_inode(parent->inode, W_OK);
+    error = access_inode(parent->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     error = parent->inode->ops->directory.mklink(parent->inode, entry, tentry->inode);
@@ -827,7 +795,7 @@ int vfs_unlink(file_t *rel, const void *path, size_t length, int flags) {
         goto exit;
     }
 
-    error = access_inode(parent->inode, W_OK);
+    error = access_inode(parent->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     error = parent->inode->ops->directory.unlink(parent->inode, entry);
@@ -863,7 +831,7 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
         goto exit_early;
     }
 
-    error = access_inode(sparent->inode, W_OK);
+    error = access_inode(sparent->inode, W_OK, false);
     if (unlikely(error)) goto exit_early;
 
     dentry_t *dst;
@@ -895,7 +863,7 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
         goto exit;
     }
 
-    error = access_inode(dparent->inode, W_OK);
+    error = access_inode(dparent->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     inode_t *dst_inode = dst->inode;
@@ -941,7 +909,7 @@ exit_early:
     return error;
 }
 
-int vfs_mount(file_t *rel, const void *path, size_t length, fs_t *(*fsf)(void *), void *ctx) {
+int vfs_mount(file_t *rel, const void *path, size_t length, mount_func_t fsf, void *ctx) {
     dentry_t *entry;
     int error = fresolve(&entry, rel, path, length, 0);
     if (unlikely(error)) return error;
@@ -963,7 +931,9 @@ int vfs_mount(file_t *rel, const void *path, size_t length, fs_t *(*fsf)(void *)
         goto exit;
     }
 
-    fs_t *fs = fsf(ctx);
+    fs_t *fs;
+    error = fsf(&fs, ctx);
+    if (unlikely(error)) goto exit;
 
     ASSERT(!entry->mounted_fs);
     entry->mounted_fs = fs;
@@ -1011,7 +981,7 @@ exit:
 int vfs_chdir(file_t *file) {
     if (unlikely(!file->path || !S_ISDIR(file->inode->mode))) return ENOTDIR;
 
-    int error = access_inode(file->inode, X_OK);
+    int error = access_inode(file->inode, X_OK, false);
     if (unlikely(error)) return error;
 
     file_t *old = current->process->cwd;
@@ -1020,6 +990,19 @@ int vfs_chdir(file_t *file) {
     file_deref(old);
 
     return 0;
+}
+
+int vfs_access(file_t *rel, const void *path, size_t length, int amode, int flags) {
+    if (unlikely(amode & ~(R_OK | W_OK | X_OK))) return EINVAL;
+    if (unlikely(flags & ~AT_EACCESS)) return EINVAL;
+
+    dentry_t *entry;
+    int error = fresolve(&entry, rel, path, length, RESOLVE_MUST_EXIST | RESOLVE_FOLLOW_SYMLINKS);
+    if (unlikely(error)) return error;
+
+    error = access_inode(entry->inode, amode, !(flags & AT_EACCESS));
+    dentry_deref(entry);
+    return error;
 }
 
 int vfs_readlink(file_t *rel, const void *path, size_t length, void *buf, size_t *buf_len) {
@@ -1113,7 +1096,7 @@ int vfs_truncate(file_t *rel, const void *path, size_t length, off_t size) {
     int error = fresolve(&entry, rel, path, length, RESOLVE_MUST_EXIST | RESOLVE_NO_RO_FS | RESOLVE_FOLLOW_SYMLINKS);
     if (unlikely(error)) return error;
 
-    error = access_inode(entry->inode, W_OK);
+    error = access_inode(entry->inode, W_OK, false);
     if (unlikely(error)) goto exit;
 
     error = truncate_inode(entry->inode, size);
@@ -1126,7 +1109,7 @@ int vfs_ftruncate(file_t *file, off_t size) {
     if (unlikely(size < 0)) return EINVAL;
 
     int error = access_file(file, W_OK);
-    if (unlikely(error)) return error;
+    if (unlikely(error)) return EBADF;
 
     return truncate_inode(file->inode, size);
 }
@@ -1134,7 +1117,7 @@ int vfs_ftruncate(file_t *file, off_t size) {
 static int chown_inode(inode_t *inode, uid_t uid, gid_t gid) {
     if (current->process->euid) {
         if (uid != (uid_t)-1) return EPERM;
-        if (gid != (gid_t)-1 && gid != inode->gid && get_relation(-1, gid) != REL_GROUP) return EPERM;
+        if (gid != (gid_t)-1 && gid != inode->gid && get_relation(-1, gid, false) != REL_GROUP) return EPERM;
     }
 
     return inode->ops->chown(inode, uid, gid);

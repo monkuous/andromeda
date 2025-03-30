@@ -74,6 +74,9 @@ static void *cache_del(pgcache_t *cache, uint64_t index) {
 int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create) {
     if (index >= cache->pages) return ENXIO;
 
+    bool evictable = is_evictable(cache);
+    if (evictable) create = true;
+
     void **ptr = get_ptr(cache, index, create);
     if (!ptr) {
         ASSERT(!create);
@@ -84,10 +87,8 @@ int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create
     page_t *page = *ptr;
 
     if (page) {
-        if (is_evictable(cache)) lru_refresh(page);
+        if (evictable) lru_refresh(page);
     } else if (create) {
-        bool evictable = is_evictable(cache);
-
         page = *ptr = pmem_alloc(evictable);
         page->cache.cache = cache;
         page->cache.index = index;
@@ -140,6 +141,8 @@ static void free_entry(pgcache_t *cache, void *ptr, size_t level, bool evictable
 }
 
 void pgcache_resize(pgcache_t *cache, uint64_t size) {
+    size = (size + PAGE_MASK) >> PAGE_SHIFT;
+
     size_t new_levels = levels_for_size(size);
 
     if (size < cache->pages) {
@@ -196,4 +199,66 @@ page_t *pgcache_evict() {
     }
 
     return page;
+}
+
+int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {
+    ASSERT(size);
+    ASSERT(((offset + (size - 1)) >> PAGE_SHIFT) < cache->pages);
+
+    uint64_t index = offset >> PAGE_SHIFT;
+    size_t pgoff = offset & PAGE_MASK;
+    size_t pgrem = PAGE_SIZE - pgoff;
+
+    while (size) {
+        size_t cur = pgrem < size ? pgrem : size;
+
+        page_t *page;
+        int error = pgcache_get_page(cache, &page, index, false);
+        if (unlikely(error)) return error;
+
+        if (page) {
+            // TODO: Use user_memcpy
+            memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cur);
+        } else {
+            // TODO: Use user_memset
+            memset(buffer, 0, cur);
+        }
+
+        buffer += cur;
+        size -= cur;
+        index += 1;
+        pgoff = 0;
+        pgrem = PAGE_SIZE;
+    }
+
+    return 0;
+}
+
+int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t offset) {
+    ASSERT(size);
+    ASSERT(((offset + (size - 1)) >> PAGE_SHIFT) < cache->pages);
+    ASSERT(!is_evictable(cache));
+
+    uint64_t index = offset >> PAGE_SHIFT;
+    size_t pgoff = offset & PAGE_MASK;
+    size_t pgrem = PAGE_SIZE - pgoff;
+
+    while (size) {
+        size_t cur = pgrem < size ? pgrem : size;
+
+        page_t *page;
+        int error = pgcache_get_page(cache, &page, index, true);
+        if (unlikely(error)) return error;
+
+        // TODO: Use user_memcpy
+        memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cur);
+
+        buffer += cur;
+        size -= cur;
+        index += 1;
+        pgoff = 0;
+        pgrem = PAGE_SIZE;
+    }
+
+    return 0;
 }

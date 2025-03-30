@@ -640,11 +640,11 @@ int setuid(uid_t uid) {
     return 0;
 }
 
-relation_t get_relation(uid_t uid, gid_t gid) {
+relation_t get_relation(uid_t uid, gid_t gid, bool real) {
     process_t *p = current->process;
 
-    if (uid == p->euid) return REL_OWNER;
-    if (gid == p->egid) return REL_GROUP;
+    if (uid == real ? p->ruid : p->euid) return REL_OWNER;
+    if (gid == real ? p->rgid : p->egid) return REL_GROUP;
 
     for (int i = 0; i < p->ngroups; i++) {
         if (p->groups[i] == gid) return REL_GROUP;

@@ -1,8 +1,11 @@
 #include "device.h"
 #include "compiler.h"
 #include "drv/biosdisk.h"
+#include "fs/pgcache.h"
 #include "fs/vfs.h"
+#include "mem/pmem.h"
 #include "string.h"
+#include "util/panic.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -72,4 +75,29 @@ int open_bdev(dev_t device, file_t *file, int flags) {
 
 int open_cdev(dev_t, file_t *, int) {
     return ENXIO;
+}
+
+static int flat_pgcache_read_page(pgcache_t *ptr, page_t *page, uint64_t idx) {
+    flat_pgcache_t *self = (flat_pgcache_t *)ptr;
+    uint64_t block = self->block + (idx << (PAGE_SHIFT - self->device->block_shift));
+    size_t count = PAGE_SIZE >> self->device->block_shift;
+
+    return self->device->ops->rphys(self->device, page_to_phys(page), block, count);
+}
+
+static const pgcache_ops_t flat_pgcache_ops = {
+    .read_page = flat_pgcache_read_page,
+};
+
+void init_flat_pgcache(flat_pgcache_t *cache, bdev_t *dev, uint64_t offset, uint64_t size) {
+    ASSERT(size);
+    ASSERT(!(offset & ((1ul << dev->block_shift) - 1)));
+    ASSERT(((offset + (size - 1)) >> dev->block_shift) < dev->blocks);
+    ASSERT(dev->block_shift <= PAGE_SHIFT);
+
+    cache->base.ops = &flat_pgcache_ops;
+    cache->device = dev;
+    cache->block = offset >> dev->block_shift;
+
+    pgcache_resize(&cache->base, size);
 }

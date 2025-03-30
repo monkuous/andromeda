@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fs/pgcache.h"
 #include "fs/vfs.h"
 #include <stdint.h>
 #include <sys/types.h>
@@ -20,9 +21,18 @@ struct bdev {
     const bdev_ops_t *ops;
     uint64_t blocks;
     int block_shift;
+    dev_t id;
 };
+
+typedef struct {
+    pgcache_t base;
+    bdev_t *device;
+    uint64_t block;
+} flat_pgcache_t;
 
 bdev_t *resolve_bdev(dev_t device);
 
 int open_bdev(dev_t device, file_t *file, int flags);
 int open_cdev(dev_t device, file_t *file, int flags);
+
+void init_flat_pgcache(flat_pgcache_t *cache, bdev_t *dev, uint64_t offset, uint64_t size);

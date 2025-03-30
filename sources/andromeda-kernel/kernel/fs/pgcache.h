@@ -24,6 +24,8 @@ struct pgcache {
 // WARNING: The returned page is only valid until the next memory allocation,
 // because any memory allocation is allowed to evict a page from the page cache.
 int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create);
+int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset);
+int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t offset);
 
 void pgcache_resize(pgcache_t *cache, uint64_t size);
 
