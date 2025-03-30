@@ -30,3 +30,4 @@ int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t of
 void pgcache_resize(pgcache_t *cache, uint64_t size);
 
 page_t *pgcache_evict();
+void pgcache_evict_specific(page_t *page);

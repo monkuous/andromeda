@@ -35,7 +35,9 @@ page_t *pmem_alloc(bool cache) {
     size_t idx = --page->free.count;
     if (likely(!idx)) free_pages = page->free.next;
     page += idx;
+
     page->is_free = false;
+    page->is_cache = false;
 
     if (cache) pmem_stats.cache += 1;
     else pmem_stats.alloc += 1;
@@ -133,11 +135,17 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
     while (head <= alloc_head) {
         page_t *base = phys_to_page(alloc_head);
         uint32_t i;
+        bool has_cache = false;
 
         for (i = count; i > 0; i--) {
             page_t *page = &base[i - 1];
 
             if (!page->is_free) {
+                if (page->is_cache) {
+                    has_cache = true;
+                    continue;
+                }
+
                 uint32_t new_alloc_tail = page_to_phys(page) - 1;
                 if (new_alloc_tail < ctx->offset) return true;
                 alloc_head = new_alloc_tail - ctx->offset;
@@ -147,7 +155,17 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
 
         if (i) continue;
 
-        memset(base, 0, count); // set is_free to 0 for all pages
+        if (has_cache) {
+            for (i = 0; i < count; i++) {
+                page_t *page = &base[i];
+
+                if (page->is_cache) {
+                    pgcache_evict_specific(page);
+                }
+            }
+        }
+
+        memset(base, 0, count); // set is_free and is_cache to 0 for all pages
         pmem_stats.alloc += count;
 
         ctx->page = base;
@@ -177,7 +195,7 @@ page_t *pmem_alloc_slow(size_t count, uint32_t max_addr) {
 void pmem_free_multiple(page_t *pages, size_t count) {
     if (!count) return;
 
-    memset(pages, 0, count * sizeof(*pages)); // set is_free to 1 for all pages
+    memset(pages, 0xff, count * sizeof(*pages)); // set is_free to 1 for all pages
     pages->free.count = count;
     pages->free.next = free_pages;
     free_pages = pages;

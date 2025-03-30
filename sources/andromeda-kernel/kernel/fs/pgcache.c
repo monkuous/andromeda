@@ -89,7 +89,7 @@ int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create
     if (page) {
         if (evictable) lru_refresh(page);
     } else if (create) {
-        page = *ptr = pmem_alloc(evictable);
+        page = pmem_alloc(evictable);
         page->cache.cache = cache;
         page->cache.index = index;
 
@@ -100,10 +100,13 @@ int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create
                 return error;
             }
 
+            page->is_cache = true;
             lru_add(page);
         } else {
             memset(pmap_tmpmap(page_to_phys(page)), 0, PAGE_SIZE);
         }
+
+        *ptr = page;
     }
 
     *out = page;
@@ -192,13 +195,17 @@ page_t *pgcache_evict() {
     page_t *page = container(page_t, cache.lru_node, list_remove_head(&pgcache_lru));
 
     if (page) {
-        [[maybe_unused]] page_t *deleted = cache_del(page->cache.cache, page->cache.index);
-        ASSERT(deleted == page);
-
-        handle_eviction(page->cache.cache, page);
+        pgcache_evict_specific(page);
     }
 
     return page;
+}
+
+void pgcache_evict_specific(page_t *page) {
+    [[maybe_unused]] page_t *deleted = cache_del(page->cache.cache, page->cache.index);
+    ASSERT(deleted == page);
+
+    handle_eviction(page->cache.cache, page);
 }
 
 int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {

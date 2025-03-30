@@ -10,6 +10,7 @@
 
 typedef struct [[gnu::aligned(32)]] page {
     bool is_free : 1;
+    bool is_cache : 1;
     union {
         struct {
             struct page *next;
