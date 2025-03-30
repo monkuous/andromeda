@@ -110,7 +110,9 @@ static int biosdisk_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t cou
         size_t direct_blocks = (0x100000 - phys) >> ptr->block_shift;
 
         if (direct_blocks) {
-            int error = do_read(ptr, phys, block, count);
+            if (direct_blocks > count) direct_blocks = count;
+
+            int error = do_read(ptr, phys, block, direct_blocks);
             if (unlikely(error)) return error;
 
             phys += direct_blocks << ptr->block_shift;
