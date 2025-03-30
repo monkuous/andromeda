@@ -268,6 +268,8 @@ pid_t pfork(thread_t *thread) {
 
     ent->process.cwd = curp->cwd;
     file_ref(ent->process.cwd);
+    ent->process.root = curp->root;
+    file_ref(ent->process.root);
     ent->process.umask = curp->umask;
 
     thread->process = &ent->process;
@@ -455,6 +457,7 @@ static void make_zombie(process_t *proc) {
 
     leave_group(proc, proc->group);
     file_deref(proc->cwd);
+    file_deref(proc->root);
 
     proc->wa_info.si_code = CLD_EXITED;
     bool should_clean = trigger_wait(proc);

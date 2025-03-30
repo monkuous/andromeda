@@ -39,6 +39,7 @@ struct process {
     int ngroups;
 
     file_t *cwd;
+    file_t *root;
     mode_t umask;
 
     list_t waiting;    // list of active pwait calls

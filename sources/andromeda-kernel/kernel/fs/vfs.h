@@ -155,6 +155,7 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
 int vfs_mount(file_t *rel, const void *path, size_t length, mount_func_t fs, void *ctx);
 int vfs_unmount(file_t *rel, const void *path, size_t length);
 int vfs_chdir(file_t *file);
+int vfs_chroot(file_t *file);
 
 int vfs_access(file_t *rel, const void *path, size_t length, int amode, int flags);
 int vfs_readlink(file_t *rel, const void *path, size_t length, void *buf, size_t *buf_len);

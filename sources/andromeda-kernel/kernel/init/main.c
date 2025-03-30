@@ -13,7 +13,6 @@
 #include "proc/process.h"
 #include "util/panic.h"
 #include "util/print.h"
-#include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/stat.h>

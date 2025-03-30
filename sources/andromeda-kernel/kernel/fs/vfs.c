@@ -447,9 +447,16 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
         path++;
         length--;
 
-        rel = &root_dentry;
-        dentry_ref(rel);
-        mount_top(&rel);
+        if (current->process->root) {
+            file_t *file = current->process->root;
+            if (file->path->inode != file->inode) return ENOENT;
+            rel = file->path;
+            dentry_ref(rel);
+        } else {
+            rel = &root_dentry;
+            dentry_ref(rel);
+            mount_top(&rel);
+        }
     } else {
         if (!rel) {
             file_t *file = current->process->cwd;
@@ -513,7 +520,7 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
                 cur = mountpoint;
             }
 
-            if (cur->parent) {
+            if (cur->parent && cur->parent != current->process->root->path) {
                 dentry_deref(rel);
                 rel = cur->parent;
                 dentry_ref(rel);
@@ -1002,6 +1009,18 @@ int vfs_chdir(file_t *file) {
     file_t *old = current->process->cwd;
     file_ref(file);
     current->process->cwd = file;
+    file_deref(old);
+
+    return 0;
+}
+
+int vfs_chroot(file_t *file) {
+    if (current->process->euid) return EPERM;
+    if (unlikely(!file->path || !S_ISDIR(file->inode->mode))) return ENOTDIR;
+
+    file_t *old = current->process->root;
+    file_ref(file);
+    current->process->root = file;
     file_deref(old);
 
     return 0;
