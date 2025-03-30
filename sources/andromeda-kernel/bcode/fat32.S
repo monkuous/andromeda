@@ -205,7 +205,12 @@ next_cluster:
     call read_sectors
     pop %ebx
     # get cluster number and return
-    mov (%ebx,%edi), %eax
+    add %ebx, %edi
+    mov %di, %si
+    shr $4, %edi
+    and $15, %si
+    mov %di, %es
+    mov %es:(%si), %eax
     cmp $0xffffff8, %eax
     ret
 .size next_cluster, . - next_cluster
