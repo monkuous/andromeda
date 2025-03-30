@@ -22,6 +22,7 @@ struct bdev {
     uint64_t blocks;
     int block_shift;
     dev_t id;
+    fs_t *fs;
 };
 
 typedef struct {

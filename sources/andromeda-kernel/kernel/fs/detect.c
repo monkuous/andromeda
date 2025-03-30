@@ -1,9 +1,13 @@
 #include "detect.h"
+#include "drv/device.h"
 #include "fs/fat.h"
 #include "util/print.h"
 #include <errno.h>
 
 int fsdetect(fs_t **out, void *ctx) {
+    bdev_t *dev = ctx;
+    if (dev->fs) return EBUSY;
+
     if (!fat_create(out, ctx)) return 0;
 
     printk("fsdetect: unrecognized filesystem\n");

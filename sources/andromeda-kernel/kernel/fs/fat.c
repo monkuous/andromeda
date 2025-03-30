@@ -360,6 +360,8 @@ static const inode_ops_t fat_inode_ops = {
 
 static void fatfs_free(fs_t *ptr) {
     fatfs_t *self = (fatfs_t *)ptr;
+    ASSERT(self->device->fs == &self->base);
+    self->device->fs = nullptr;
     vmfree(self, sizeof(*self));
 }
 
@@ -527,6 +529,7 @@ int fat_create(fs_t **out, void *ctx) {
     init_fs(&fs->base, root);
     inode_deref(root);
 
+    dev->fs = &fs->base;
     *out = &fs->base;
 exit:
     vmfree(bpb, bpb_size);
