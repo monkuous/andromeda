@@ -760,6 +760,18 @@ exit_early:
     return error;
 }
 
+static int access_sticky(inode_t *inode, inode_t *file) {
+    if (inode->mode & S_ISVTX) {
+        if (!current->process->euid) return 0;
+        if (current->process->euid == file->uid) return 0;
+        if (current->process->euid == inode->uid) return 0;
+
+        return EACCES;
+    }
+
+    return access_inode(inode, W_OK, false);
+}
+
 int vfs_unlink(file_t *rel, const void *path, size_t length, int flags) {
     if (unlikely(flags & ~AT_REMOVEDIR)) return EINVAL;
 
@@ -795,7 +807,7 @@ int vfs_unlink(file_t *rel, const void *path, size_t length, int flags) {
         goto exit;
     }
 
-    error = access_inode(parent->inode, W_OK, false);
+    error = access_sticky(parent->inode, entry->inode);
     if (unlikely(error)) goto exit;
 
     error = parent->inode->ops->directory.unlink(parent->inode, entry);
@@ -831,7 +843,7 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
         goto exit_early;
     }
 
-    error = access_inode(sparent->inode, W_OK, false);
+    error = access_sticky(sparent->inode, src->inode);
     if (unlikely(error)) goto exit_early;
 
     dentry_t *dst;
@@ -863,12 +875,12 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
         goto exit;
     }
 
-    error = access_inode(dparent->inode, W_OK, false);
-    if (unlikely(error)) goto exit;
-
     inode_t *dst_inode = dst->inode;
 
     if (dst_inode) {
+        error = access_sticky(dparent->inode, dst_inode);
+        if (unlikely(error)) goto exit;
+
         if (S_ISDIR(dst_inode->mode)) {
             if (!S_ISDIR(src->inode->mode)) {
                 error = EISDIR;
@@ -883,6 +895,9 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
             error = ENOTDIR;
             goto exit;
         }
+    } else {
+        error = access_inode(dparent->inode, W_OK, false);
+        if (unlikely(error)) goto exit;
     }
 
     error = sparent->inode->ops->directory.rename(sparent->inode, src, dparent->inode, dst);
