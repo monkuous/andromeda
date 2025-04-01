@@ -3,6 +3,7 @@
 #include "drv/idle.h"
 #include "mem/vmalloc.h"
 #include "proc/process.h"
+#include "proc/signal.h"
 #include "string.h"
 #include "util/container.h"
 #include "util/list.h"
@@ -59,18 +60,14 @@ void sched_block(thread_cont_t cont, void *ctx, bool interruptible) {
     current->state = interruptible ? THREAD_INTERRUPTIBLE : THREAD_UNINTERRUPTIBLE;
     current->continuation.func = cont;
     current->continuation.ctx = ctx;
+    current->process->nrunning -= 1;
     sched_yield();
 }
 
 void sched_exit() {
     current->state = THREAD_EXITED;
+    current->process->nrunning -= 1;
     sched_yield();
-}
-
-static void maybe_preempt() {
-    // For now, this does nothing, because there are no priorities.
-    // If priorities are implemented, this should check if a higher priority
-    // is runnable, and if so, switch to that.
 }
 
 static void do_wake(thread_t *thread, wake_reason_t reason) {
@@ -81,11 +78,11 @@ static void do_wake(thread_t *thread, wake_reason_t reason) {
         thread_ref(thread);
     }
 
+    thread->process->nrunning += 1;
+
     thread->state = THREAD_RUNNING;
     thread->wake_reason = reason;
     list_insert_tail(&thread_queue, &thread->node);
-
-    maybe_preempt();
 }
 
 void sched_interrupt(thread_t *thread) {
@@ -116,6 +113,8 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
     thread->regs.gs = GDT_SEL_UDATA;
     thread->regs.ss = GDT_SEL_UDATA;
 
+    thread->sigstack.ss_flags |= SS_DISABLE;
+
     return thread;
 }
 
@@ -129,6 +128,7 @@ void thread_deref(thread_t *thread) {
             remove_thread_from_process(thread);
         }
 
+        cleanup_signals(&thread->signals);
         vmfree(thread, sizeof(*thread));
     }
 }

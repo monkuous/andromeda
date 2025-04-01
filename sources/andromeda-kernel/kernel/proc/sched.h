@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cpu/idt.h"
+#include "proc/signal.h"
 #include "util/list.h"
 #include <stddef.h>
 
@@ -19,7 +20,7 @@ typedef enum {
     WAKE_INTERRUPT,
 } wake_reason_t;
 
-typedef struct {
+typedef struct thread {
     size_t references;
     list_node_t node;
     thread_state_t state;
@@ -31,6 +32,11 @@ typedef struct {
     wake_reason_t wake_reason;
     struct process *process;
     list_node_t pnode;
+    signal_target_t signals;
+    sigset_t signal_mask;
+    stack_t sigstack;
+    bool should_exit : 1;
+    bool should_stop : 1;
 } thread_t;
 
 extern thread_t *current;

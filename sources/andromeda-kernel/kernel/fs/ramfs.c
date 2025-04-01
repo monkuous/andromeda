@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "fs/vfs.h"
 #include "klimits.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/panic.h"
@@ -85,9 +86,10 @@ static int ramfs_inode_dir_create(inode_t *self, dentry_t *entry, mode_t mode, d
 
 static int ramfs_inode_dir_symlink(inode_t *self, dentry_t *entry, const void *target, size_t length) {
     void *buffer = vmalloc(length);
-    memcpy(buffer, target, length); // TODO: Use user_memcpy
+    int error = user_memcpy(buffer, target, length);
+    if (unlikely(error)) return error;
 
-    int error = ramfs_inode_dir_create(self, entry, S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO, 0);
+    error = ramfs_inode_dir_create(self, entry, S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO, 0);
     if (unlikely(error)) {
         vmfree(buffer, length);
         return error;

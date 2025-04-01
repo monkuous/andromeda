@@ -4,6 +4,7 @@
 #include "fs/pgcache.h"
 #include "klimits.h"
 #include "mem/pmem.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "proc/process.h"
 #include "proc/sched.h"
@@ -1127,9 +1128,10 @@ int vfs_readlink(file_t *rel, const void *path, size_t length, void *buf, size_t
     size_t len = *buf_len;
     if (len > entry->inode->size) len = entry->inode->size;
 
-    memcpy(buf, entry->inode->symlink, len); // TODO: Use user_memcpy
-    *buf_len = len;
+    error = user_memcpy(buf, entry->inode->symlink, len);
+    if (unlikely(error)) goto exit;
 
+    *buf_len = len;
 exit:
     dentry_deref(entry);
     return error;
@@ -1155,9 +1157,7 @@ static int do_stat(inode_t *inode, struct stat *out) {
         buf.st_rdev = inode->device;
     }
 
-    // TODO: Use user_memcpy
-    memcpy(out, &buf, sizeof(buf));
-    return 0;
+    return user_memcpy(out, &buf, sizeof(buf));
 }
 
 int vfs_stat(file_t *rel, const void *path, size_t length, struct stat *out, int flags) {

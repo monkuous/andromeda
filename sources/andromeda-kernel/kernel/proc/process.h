@@ -3,6 +3,7 @@
 #include "fs/vfs.h"
 #include "klimits.h"
 #include "proc/sched.h"
+#include "proc/signal.h"
 #include "util/list.h"
 #include <signal.h> /* IWYU pragma: keep */
 #include <sys/types.h>
@@ -27,6 +28,7 @@ struct process {
 
     list_t children;
     list_t threads;
+    size_t nrunning;
 
     uid_t euid;
     uid_t ruid;
@@ -42,6 +44,9 @@ struct process {
     file_t *root;
     mode_t umask;
 
+    signal_target_t signals;
+    struct sigaction signal_handlers[NSIG];
+
     list_t waiting;    // list of active pwait calls
     list_t wait_avail; // list of children with wait info available
     list_node_t wa_node;
@@ -49,6 +54,7 @@ struct process {
 
     bool did_exec : 1;
     bool has_wait : 1;
+    bool stopped : 1;
 };
 
 struct prgroup {
@@ -114,3 +120,7 @@ pid_t pfork(thread_t *thread);
 void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void *ctx);
 
 void remove_thread_from_process(thread_t *thread);
+
+void proc_kill(pending_signal_t *trigger);
+void proc_stop(pending_signal_t *trigger);
+void proc_continue(process_t *proc, pending_signal_t *trigger);

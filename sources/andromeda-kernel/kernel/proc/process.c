@@ -2,11 +2,13 @@
 #include "compiler.h"
 #include "mem/vmalloc.h"
 #include "proc/sched.h"
+#include "proc/signal.h"
 #include "string.h"
 #include "util/container.h"
 #include "util/hash.h"
 #include "util/list.h"
 #include "util/panic.h"
+#include <abi-bits/signal.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
@@ -288,7 +290,7 @@ struct waitctx {
     int options;
     void (*cont)(int, siginfo_t *, void *);
     void *ctx;
-    process_t *proc;
+    siginfo_t info;
 };
 
 static bool wait_type_matches(int options, process_t *proc) {
@@ -331,12 +333,11 @@ static void clean_zombie(process_t *proc) {
 }
 
 static void pwait_cont(void *ptr) {
-    process_t *cproc = current->process;
     struct waitctx *ctx = ptr;
 
     if (current->wake_reason == WAKE_UNBLOCK) {
-        if (ctx->proc) {
-            ctx->cont(0, &ctx->proc->wa_info, ctx);
+        if (ctx->info.si_signo) {
+            ctx->cont(0, &ctx->info, ctx);
             // consumption is handled by trigger_wait
         } else {
             ctx->cont(ECHILD, nullptr, ctx->ctx);
@@ -345,8 +346,13 @@ static void pwait_cont(void *ptr) {
         ctx->cont(EINTR, nullptr, ctx->ctx);
     }
 
-    list_remove(&cproc->waiting, &ctx->node);
     vmfree(ctx, sizeof(*ctx));
+}
+
+static void consume_wait(process_t *parent, process_t *child) {
+    child->has_wait = false;
+    child->wa_info.si_signo = 0;
+    list_remove(&parent->wait_avail, &child->wa_node);
 }
 
 void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void *ctx) {
@@ -372,9 +378,8 @@ void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void 
             cont(0, &child->wa_info, ctx);
 
             if (!(options & WNOWAIT)) {
-                child->has_wait = false;
-                list_remove(&cproc->wait_avail, &child->wa_node);
-                if (child->wa_info.si_code == CLD_EXITED) clean_zombie(child);
+                consume_wait(cproc, child);
+                if (list_is_empty(&child->threads)) clean_zombie(child);
             }
 
             return;
@@ -400,10 +405,9 @@ void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void 
 }
 
 static bool trigger_wait(process_t *proc) {
-    process_t *parent = proc->parent;
+    ASSERT(proc->wa_info.si_signo == SIGCHLD);
 
-    proc->wa_info.si_signo = SIGCHLD;
-    proc->wa_info.si_pid = pent(proc)->id;
+    process_t *parent = proc->parent;
 
     if (!proc->has_wait) {
         proc->has_wait = true;
@@ -420,27 +424,30 @@ static bool trigger_wait(process_t *proc) {
             bool consume = !(cur->options & WNOWAIT);
 
             if (!consume || !consumed) {
-                cur->proc = proc;
+                cur->info = proc->wa_info;
                 sched_unblock(cur->thread);
 
                 if (consume) {
                     consumed = true;
                 }
             }
+
+            list_remove(&parent->waiting, &cur->node);
         }
 
         cur = next;
     }
 
     if (consumed) {
-        proc->has_wait = false;
-        list_remove(&parent->wait_avail, &proc->wa_node);
+        consume_wait(parent, proc);
     }
 
     return consumed;
 }
 
 static void make_zombie(process_t *proc) {
+    ASSERT(proc->wa_info.si_signo == SIGCHLD);
+
     if (proc == &init_process) panic("tried to kill init");
 
     // Reparent children
@@ -458,11 +465,13 @@ static void make_zombie(process_t *proc) {
     leave_group(proc, proc->group);
     file_deref(proc->cwd);
     file_deref(proc->root);
+    cleanup_signals(&proc->signals);
 
-    proc->wa_info.si_code = CLD_EXITED;
-    bool should_clean = trigger_wait(proc);
+    send_signal(proc->parent, nullptr, &proc->wa_info);
 
-    if (should_clean) clean_zombie(proc);
+    if (!(proc->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDWAIT) || trigger_wait(proc)) {
+        clean_zombie(proc);
+    }
 }
 
 void remove_thread_from_process(thread_t *thread) {
@@ -654,4 +663,69 @@ relation_t get_relation(uid_t uid, gid_t gid, bool real) {
     }
 
     return REL_OTHER;
+}
+
+void proc_kill(pending_signal_t *trigger) {
+    ASSERT(current->process->wa_info.si_signo == 0);
+    current->process->wa_info = (siginfo_t){
+            .si_signo = SIGCHLD,
+            .si_code = CLD_KILLED,
+            .si_pid = getpid(),
+            .si_uid = trigger->src,
+            .si_status = trigger->info.si_signo,
+    };
+
+    list_foreach(current->process->threads, thread_t, pnode, cur) {
+        cur->should_exit = true;
+        sched_interrupt(cur);
+    }
+}
+
+void proc_stop(pending_signal_t *trigger) {
+    if (current->process->stopped) return;
+    current->process->stopped = true;
+
+    if (!(current->process->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDSTOP)) {
+        ASSERT(current->process->wa_info.si_signo == 0);
+        current->process->wa_info = (siginfo_t){
+                .si_signo = SIGCHLD,
+                .si_code = CLD_STOPPED,
+                .si_pid = getpid(),
+                .si_uid = trigger->src,
+                .si_status = trigger->info.si_signo,
+        };
+        send_signal(current->process->parent, nullptr, &current->process->wa_info);
+        trigger_wait(current->process);
+    }
+
+    list_foreach(current->process->threads, thread_t, pnode, cur) {
+        cur->should_stop = true;
+        sched_interrupt(cur);
+    }
+}
+
+void proc_continue(process_t *proc, pending_signal_t *trigger) {
+    if (!proc->stopped) return;
+    proc->stopped = false;
+
+    if (trigger && !(current->process->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDSTOP)) {
+        ASSERT(current->process->wa_info.si_signo == 0);
+        current->process->wa_info = (siginfo_t){
+                .si_signo = SIGCHLD,
+                .si_code = CLD_CONTINUED,
+                .si_pid = getpid(),
+                .si_uid = trigger->src,
+                .si_status = trigger->info.si_signo,
+        };
+        send_signal(current->process->parent, nullptr, &current->process->wa_info);
+        trigger_wait(current->process);
+    }
+
+    list_foreach(proc->threads, thread_t, pnode, cur) {
+        if (!cur->should_stop) {
+            sched_unblock(cur);
+        } else {
+            cur->should_stop = false;
+        }
+    }
 }

@@ -2,6 +2,7 @@
 #include "asm/cr.h"
 #include "cpu/gdt.h"
 #include "proc/sched.h"
+#include "proc/signal.h"
 #include "util/panic.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -131,11 +132,26 @@ void init_idt() {
 [[gnu::used]] idt_frame_t *idt_dispatch(idt_frame_t *frame) {
     if (frame->cs & 3) {
         current->regs = *frame;
+
+        if (current->should_exit) {
+            sched_exit();
+        }
     }
 
-    handle_fatal_exception(frame, frame->cs & 3);
+    switch (frame->vector) {
+    default: handle_fatal_exception(frame, frame->cs & 3); break;
+    }
 
     if (frame->cs & 3) {
+        trigger_signals();
+
+        if (current->should_exit) sched_exit();
+
+        if (current->should_stop) {
+            current->should_stop = false;
+            sched_block(nullptr, nullptr, true);
+        }
+
         *frame = current->regs;
     }
 

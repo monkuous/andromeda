@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "mem/pmap.h"
 #include "mem/pmem.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/container.h"
@@ -129,8 +130,8 @@ static void free_entry(pgcache_t *cache, void *ptr, size_t level, bool evictable
 
     if (level == 0) {
         page_t *page = ptr;
-        if (evictable) lru_del(page);
         handle_eviction(cache, page);
+        if (evictable) lru_del(page);
         pmem_free(page, evictable);
     } else {
         void **table = ptr;
@@ -192,7 +193,7 @@ void pgcache_resize(pgcache_t *cache, uint64_t size) {
 }
 
 page_t *pgcache_evict() {
-    page_t *page = container(page_t, cache.lru_node, list_remove_head(&pgcache_lru));
+    page_t *page = container(page_t, cache.lru_node, pgcache_lru.first);
 
     if (page) {
         pgcache_evict_specific(page);
@@ -202,10 +203,11 @@ page_t *pgcache_evict() {
 }
 
 void pgcache_evict_specific(page_t *page) {
+    handle_eviction(page->cache.cache, page);
+    lru_del(page);
+
     [[maybe_unused]] page_t *deleted = cache_del(page->cache.cache, page->cache.index);
     ASSERT(deleted == page);
-
-    handle_eviction(page->cache.cache, page);
 }
 
 int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {
@@ -224,12 +226,12 @@ int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {
         if (unlikely(error)) return error;
 
         if (page) {
-            // TODO: Use user_memcpy
-            memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cur);
+            error = user_memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cur);
         } else {
-            // TODO: Use user_memset
-            memset(buffer, 0, cur);
+            error = user_memset(buffer, 0, cur);
         }
+
+        if (unlikely(error)) return error;
 
         buffer += cur;
         size -= cur;
@@ -257,8 +259,8 @@ int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t of
         int error = pgcache_get_page(cache, &page, index, true);
         if (unlikely(error)) return error;
 
-        // TODO: Use user_memcpy
-        memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cur);
+        error = user_memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cur);
+        if (unlikely(error)) return error;
 
         buffer += cur;
         size -= cur;
