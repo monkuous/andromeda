@@ -5,6 +5,7 @@
 #include "mem/pmap.h"
 #include "proc/sched.h"
 #include "proc/signal.h"
+#include "sys/syscall.h"
 #include "util/panic.h"
 #include <signal.h>
 #include <stddef.h>
@@ -143,16 +144,19 @@ void init_idt() {
     idt[0x20] = create_irq_entry(idt_thunks[0x20], 3);
 }
 
-[[gnu::used]] idt_frame_t *idt_dispatch(idt_frame_t *frame) {
-    if (frame->cs & 3) {
-        current->regs = *frame;
+[[gnu::used]] idt_frame_t *idt_dispatch(idt_frame_t *real_frame) {
+    idt_frame_t *frame = real_frame;
+
+    if (real_frame->cs & 3) {
+        current->regs = *real_frame;
+        frame = &current->regs;
 
         if (current->should_exit) {
             sched_exit();
         }
     }
 
-    switch (frame->vector) {
+    switch (real_frame->vector) {
     case 0x00: signal_or_fatal(frame, SIGFPE); break;
     case 0x01: signal_or_fatal(frame, SIGTRAP); break;
     case 0x03: signal_or_fatal(frame, SIGTRAP); break;
@@ -164,10 +168,11 @@ void init_idt() {
     case 0x0e: handle_page_fault(frame); break;
     case 0x10: signal_or_fatal(frame, SIGFPE); break;
     case 0x13: signal_or_fatal(frame, SIGFPE); break;
+    case 0x20: handle_syscall(frame); break;
     default: handle_fatal_exception(frame); break;
     }
 
-    if (frame->cs & 3) {
+    if (real_frame->cs & 3) {
         trigger_signals();
 
         if (current->should_exit) sched_exit();
@@ -177,8 +182,8 @@ void init_idt() {
             sched_block(nullptr, nullptr, true);
         }
 
-        *frame = current->regs;
+        *real_frame = current->regs;
     }
 
-    return frame;
+    return real_frame;
 }

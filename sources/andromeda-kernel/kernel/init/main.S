@@ -280,12 +280,13 @@ intcall:
 .type kernel_gdt, @object
 kernel_gdt:
     .quad 0
-    .quad 0xcf9b000000ffff
-    .quad 0xcf93000000ffff
-    .quad 0xcffb000000ffff
-    .quad 0xcff3000000ffff
-    .quad 0x009b000000ffff
-    .quad 0x0093000000ffff
+    .quad 0xcf9b000000ffff # kernel code
+    .quad 0xcf93000000ffff # kernel data
+    .quad 0xcffb000000ffff # user code
+    .quad 0xcff3000000ffff # user data
+    .quad 0xcff3000000ffff # thread data
+    .quad 0x009b000000ffff # bios code
+    .quad 0x0093000000ffff # bios data
     .quad 0 # kernel tss
     .quad 0 # df tss
 .set .Lgdt_lim, . - kernel_gdt - 1

@@ -1,5 +1,6 @@
 #include "process.h"
 #include "compiler.h"
+#include "fs/vfs.h"
 #include "mem/vmalloc.h"
 #include "proc/sched.h"
 #include "proc/signal.h"
@@ -14,6 +15,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
+#define FD_RESERVED ((void *)1)
 
 procent_t init_procent;
 
@@ -274,6 +277,21 @@ pid_t pfork(thread_t *thread) {
     file_ref(ent->process.root);
     ent->process.umask = curp->umask;
 
+    memcpy(ent->process.signal_handlers, curp->signal_handlers, sizeof(curp->signal_handlers));
+
+    size_t fds_size = sizeof(*curp->fds) * curp->fds_cap;
+    ent->process.fds = vmalloc(fds_size);
+    memcpy(ent->process.fds, curp->fds, fds_size);
+    ent->process.fds_cap = curp->fds_cap;
+    ent->process.fds_start = curp->fds_start;
+
+    for (size_t i = 0; i < ent->process.fds_cap; i++) {
+        struct fd *cur = &ent->process.fds[i];
+
+        if (cur->file == FD_RESERVED) cur->file = nullptr;
+        else if (cur->file) file_ref(cur->file);
+    }
+
     thread->process = &ent->process;
     list_remove(&curp->threads, &thread->pnode);
     list_insert_tail(&ent->process.threads, &thread->pnode);
@@ -448,8 +466,6 @@ static bool trigger_wait(process_t *proc) {
 static void make_zombie(process_t *proc) {
     ASSERT(proc->wa_info.si_signo == SIGCHLD);
 
-    if (proc == &init_process) panic("tried to kill init");
-
     // Reparent children
     process_t *cur = container(process_t, pnode, proc->children.first);
 
@@ -466,6 +482,16 @@ static void make_zombie(process_t *proc) {
     file_deref(proc->cwd);
     file_deref(proc->root);
     cleanup_signals(&proc->signals);
+
+    for (size_t i = 0; i < proc->fds_cap; i++) {
+        struct fd *fd = &proc->fds[i];
+
+        if (fd->file) {
+            file_deref(fd->file);
+        }
+    }
+
+    vmfree(proc->fds, sizeof(*proc->fds) * proc->fds_cap);
 
     send_signal(proc->parent, nullptr, &proc->wa_info);
 
@@ -709,4 +735,88 @@ void proc_continue(process_t *proc, pending_signal_t *trigger) {
             cur->should_stop = false;
         }
     }
+}
+
+int fd_alloc() {
+    process_t *proc = current->process;
+
+    while (proc->fds_start != INT_MAX) {
+        if (proc->fds_start >= proc->fds_cap) {
+            size_t new_cap = proc->fds_cap ? proc->fds_cap * 2 : 8;
+            size_t old_size = sizeof(*proc->fds) * proc->fds_cap;
+            size_t new_size = sizeof(*proc->fds) * new_cap;
+            void *new_table = vmalloc(new_size);
+            memcpy(new_table, proc->fds, old_size);
+            memset(new_table + old_size, 0, new_size - old_size);
+            vmfree(proc->fds, old_size);
+            proc->fds = new_table;
+            proc->fds_cap = new_cap;
+        }
+
+        if (!proc->fds[proc->fds_start].file) {
+            proc->fds[proc->fds_start].file = FD_RESERVED;
+            return proc->fds_start++;
+        }
+
+        proc->fds_start += 1;
+    }
+
+    return -EMFILE;
+}
+
+void fd_assoc(int fd, file_t *file, int flags) {
+    process_t *proc = current->process;
+    ASSERT(fd >= 0 && (unsigned)fd < proc->fds_cap);
+
+    struct fd *fds = &proc->fds[fd];
+    ASSERT(fds->file == FD_RESERVED);
+
+    fds->file = file;
+    fds->flags = flags;
+    file_ref(file);
+}
+
+void fd_free(int fd) {
+    process_t *proc = current->process;
+    ASSERT(fd >= 0 && (unsigned)fd < proc->fds_cap);
+
+    struct fd *fds = &proc->fds[fd];
+    ASSERT(fds->file);
+
+    if (fds->file != FD_RESERVED) file_deref(fds->file);
+
+    fds->file = nullptr;
+    fds->flags = 0;
+
+    if ((unsigned)fd < proc->fds_start) proc->fds_start = fd;
+}
+
+int fd_lookup(file_t **out, int fd) {
+    process_t *proc = current->process;
+    if (unlikely(fd < 0)) return EBADF;
+    if (unlikely((unsigned)fd >= proc->fds_cap)) return EBADF;
+
+    file_t *file = proc->fds[fd].file;
+    if (unlikely(!file || file == FD_RESERVED)) return EBADF;
+
+    *out = file;
+    file_ref(file);
+    return 0;
+}
+
+int fd_free_checked(int fd) {
+    process_t *proc = current->process;
+    if (unlikely(fd < 0)) return EBADF;
+    if (unlikely((unsigned)fd >= proc->fds_cap)) return EBADF;
+
+    struct fd *fds = &proc->fds[fd];
+    file_t *file = fds->file;
+    if (unlikely(!file || file == FD_RESERVED)) return EBADF;
+
+    file_deref(file);
+    fds->file = nullptr;
+    fds->flags = 0;
+
+    if ((unsigned)fd < proc->fds_start) proc->fds_start = fd;
+    return 0;
 }

@@ -458,6 +458,20 @@ static void alter_process(struct eproc_data *data) {
         action->sa_mask = (sigset_t){};
     }
 
+    for (size_t i = 0; i < current->process->fds_cap; i++) {
+        struct fd *fd = &current->process->fds[i];
+
+        if (fd->flags & FD_CLOEXEC) {
+            file_deref(fd->file);
+            fd->file = nullptr;
+            fd->flags = 0;
+
+            if (i < current->process->fds_start) {
+                current->process->fds_start = i;
+            }
+        }
+    }
+
     current->process->euid = data->euid;
     current->process->egid = data->egid;
     current->process->suid = current->process->euid;
@@ -473,7 +487,7 @@ static void setup_regs(idt_frame_t *frame, struct vm_data *vm_data) {
     frame->ds = GDT_SEL_UDATA;
     frame->es = GDT_SEL_UDATA;
     frame->fs = GDT_SEL_UDATA;
-    frame->gs = GDT_SEL_UDATA;
+    frame->gs = GDT_SEL_TDATA;
     frame->ss = GDT_SEL_UDATA;
 }
 

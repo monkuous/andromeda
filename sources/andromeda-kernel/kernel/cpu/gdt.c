@@ -1,5 +1,6 @@
 #include "gdt.h"
 #include "mem/layout.h"
+#include "proc/sched.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -9,6 +10,7 @@ extern struct {
     uint64_t kern_data;
     uint64_t user_code;
     uint64_t user_data;
+    uint64_t thread_data;
     uint64_t bios_code;
     uint64_t bios_data;
     uint64_t kern_task;
@@ -38,4 +40,9 @@ void init_gdt() {
     setup_tss(&kernel_gdt.df_task, &dfault_tss);
 
     asm("ltr %w0" ::"r"(GDT_SEL_KTASK));
+}
+
+void gdt_refresh_tdata() {
+    uintptr_t addr = current->tdata;
+    kernel_gdt.thread_data = ((addr & 0xffffffull) << 16) | ((addr & 0xff000000ull) << 32) | 0xcff3000000ffff;
 }

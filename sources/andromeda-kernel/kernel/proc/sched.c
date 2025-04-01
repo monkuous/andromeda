@@ -29,6 +29,10 @@ static void handle_exit(thread_t *thread) {
 }
 
 static void handle_switch(thread_t *prev) {
+    if (prev->tdata != current->tdata) {
+        gdt_refresh_tdata();
+    }
+
     if (prev->state == THREAD_EXITED) {
         if (--prev->vm->references == 0) {
             clean_cur_pmap();
@@ -129,7 +133,7 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
     thread->regs.ds = GDT_SEL_UDATA;
     thread->regs.es = GDT_SEL_UDATA;
     thread->regs.fs = GDT_SEL_UDATA;
-    thread->regs.gs = GDT_SEL_UDATA;
+    thread->regs.gs = GDT_SEL_TDATA;
     thread->regs.ss = GDT_SEL_UDATA;
 
     thread->sigstack.ss_flags |= SS_DISABLE;

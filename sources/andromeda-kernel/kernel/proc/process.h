@@ -19,6 +19,11 @@ typedef enum {
     REL_OTHER,
 } relation_t;
 
+struct fd {
+    file_t *file;
+    int flags;
+};
+
 struct process {
     prgroup_t *group;
     list_node_t gnode;
@@ -46,6 +51,10 @@ struct process {
 
     signal_target_t signals;
     struct sigaction signal_handlers[NSIG];
+
+    struct fd *fds;
+    size_t fds_cap;
+    unsigned fds_start;
 
     list_t waiting;    // list of active pwait calls
     list_t wait_avail; // list of children with wait info available
@@ -119,3 +128,10 @@ void kill_other_threads();
 void proc_kill(pending_signal_t *trigger);
 void proc_stop(pending_signal_t *trigger);
 void proc_continue(process_t *proc, pending_signal_t *trigger);
+
+int fd_alloc();
+void fd_assoc(int fd, file_t *file, int flags);
+void fd_free(int fd);
+int fd_lookup(file_t **out, int fd);
+int fd_free_checked(int fd);
+

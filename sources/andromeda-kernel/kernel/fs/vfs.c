@@ -1298,6 +1298,7 @@ static ssize_t do_rw_op(
         bool update_pos
 ) {
     if (unlikely(!size)) return 0;
+    if (unlikely(size < 0)) return -EINVAL;
     if (unlikely(offset < 0)) return -EINVAL;
     if (unlikely(!func)) return -ENOSYS;
 

@@ -5,6 +5,7 @@
 #include "proc/signal.h"
 #include "util/list.h"
 #include <stddef.h>
+#include <stdint.h>
 
 typedef void (*thread_cont_t)(void *ctx);
 
@@ -26,6 +27,7 @@ typedef struct thread {
     list_node_t node;
     thread_state_t state;
     idt_frame_t regs;
+    uintptr_t tdata;
     struct {
         thread_cont_t func;
         void *ctx;

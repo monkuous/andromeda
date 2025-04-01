@@ -4,10 +4,11 @@
 #define GDT_SEL_KDATA 0x10
 #define GDT_SEL_UCODE 0x1b
 #define GDT_SEL_UDATA 0x23
-#define GDT_SEL_BCODE 0x28
-#define GDT_SEL_BDATA 0x30
-#define GDT_SEL_KTASK 0x38
-#define GDT_SEL_DF_TASK 0x40
+#define GDT_SEL_TDATA 0x2b
+#define GDT_SEL_BCODE 0x30
+#define GDT_SEL_BDATA 0x38
+#define GDT_SEL_KTASK 0x40
+#define GDT_SEL_DF_TASK 0x48
 
 #ifndef __ASSEMBLER__
 
@@ -46,5 +47,6 @@ typedef struct {
 extern tss_t kernel_tss, dfault_tss;
 
 void init_gdt();
+void gdt_refresh_tdata();
 
 #endif /* defined(__ASSEMBLER__) */
