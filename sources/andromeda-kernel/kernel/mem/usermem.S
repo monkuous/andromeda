@@ -1,5 +1,8 @@
 .text
 
+.globl __usermem_start
+__usermem_start:
+
 .globl user_memcpy
 .type user_memcpy, @function
 user_memcpy:
@@ -24,3 +27,8 @@ user_memset:
     pop %edi
     ret
 .size user_memset, . - user_memset
+
+.globl __usermem_end
+__usermem_end:
+
+.section ".note.GNU-stack", "", @progbits

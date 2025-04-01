@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cpu/idt.h"
+#include "mem/vmm.h"
 #include "proc/signal.h"
 #include "util/list.h"
 #include <stddef.h>
@@ -35,6 +36,7 @@ typedef struct thread {
     signal_target_t signals;
     sigset_t signal_mask;
     stack_t sigstack;
+    vm_t *vm;
     bool should_exit : 1;
     bool should_stop : 1;
 } thread_t;

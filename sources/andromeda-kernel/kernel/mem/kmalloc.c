@@ -30,7 +30,7 @@ void *kmalloc(size_t size) {
         objects[order - MIN_ORDER] = obj->next;
     } else {
         uintptr_t addr = vmem_alloc(ALLOC_SIZE);
-        pmap_alloc(addr, ALLOC_SIZE, PMAP_WRITABLE);
+        pmap_alloc(addr, ALLOC_SIZE, PMAP_WRITABLE, true);
         obj = (struct free_obj *)addr;
 
         if (order != MAX_ORDER) {

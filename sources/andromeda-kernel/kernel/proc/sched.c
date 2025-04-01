@@ -1,7 +1,9 @@
 #include "sched.h"
 #include "cpu/gdt.h"
 #include "drv/idle.h"
+#include "mem/pmap.h"
 #include "mem/vmalloc.h"
+#include "mem/vmm.h"
 #include "proc/process.h"
 #include "proc/signal.h"
 #include "string.h"
@@ -26,6 +28,22 @@ static void handle_exit(thread_t *thread) {
     thread_deref(thread);
 }
 
+static void handle_switch(thread_t *prev) {
+    if (prev->state == THREAD_EXITED) {
+        if (--prev->vm->references == 0) {
+            clean_cur_pmap();
+            switch_pmap(&current->vm->pmap);
+            vm_free(prev->vm);
+        } else if (prev->vm != current->vm) {
+            switch_pmap(&current->vm->pmap);
+        }
+
+        handle_exit(prev);
+    } else if (prev->vm != current->vm) {
+        switch_pmap(&current->vm->pmap);
+    }
+}
+
 void sched_yield() {
     thread_t *prev = current;
 
@@ -43,10 +61,7 @@ void sched_yield() {
     ASSERT(next->state == THREAD_RUNNING);
 
     current = next;
-
-    if (prev->state == THREAD_EXITED) {
-        handle_exit(prev);
-    }
+    handle_switch(prev);
 
     thread_cont_t cont = next->continuation.func;
     next->continuation.func = nullptr;
@@ -65,6 +80,10 @@ void sched_block(thread_cont_t cont, void *ctx, bool interruptible) {
 }
 
 void sched_exit() {
+    if (current->process == &init_process && !current->pnode.prev && !current->pnode.next) {
+        panic("tried to kill init");
+    }
+
     current->state = THREAD_EXITED;
     current->process->nrunning -= 1;
     sched_yield();
@@ -114,6 +133,9 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
     thread->regs.ss = GDT_SEL_UDATA;
 
     thread->sigstack.ss_flags |= SS_DISABLE;
+
+    thread->vm = current->vm;
+    thread->vm->references += 1;
 
     return thread;
 }

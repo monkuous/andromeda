@@ -43,6 +43,7 @@ typedef struct {
     int (*seek)(file_t *self, uint64_t *offset, int whence);
     int (*read)(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos);
     int (*write)(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos);
+    void (*mmap)(file_t *self, uintptr_t head, uintptr_t tail, uint64_t offset, int flags);
 } file_ops_t;
 
 struct file {

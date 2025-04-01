@@ -10,10 +10,10 @@
 #include "util/container.h"
 #include "util/panic.h"
 #include "util/time.h"
-#include <bits/posix/stat.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
 
@@ -574,9 +574,9 @@ static int create_inode(
         inode->base.nlink = 2;
         inode->base.directory = &iso9660_dir_ops;
 
-        if (!fs->need_px) {
-            pgcache_resize(&inode->base.data, inode->base.size);
+        pgcache_resize(&inode->base.data, inode->base.size);
 
+        if (!fs->need_px) {
             int error = dirino_init(fs, inode, rr_info);
             if (unlikely(error)) {
                 pgcache_resize(&inode->base.data, 0);

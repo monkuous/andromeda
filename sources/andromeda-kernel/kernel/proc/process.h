@@ -92,13 +92,7 @@ pid_t getsid(pid_t pid);
 int setpgid(pid_t pid, pid_t pgid);
 pid_t setsid();
 
-gid_t getegid();
-uid_t geteuid();
-gid_t getgid();
 int getgroups(int gidsetsize, gid_t grouplist[]);
-int getresgid(gid_t *restrict rgid, gid_t *restrict egid, gid_t *restrict sgid);
-int getresuid(uid_t *restrict ruid, uid_t *restrict euid, uid_t *restrict suid);
-uid_t getuid();
 
 int setegid(gid_t egid);
 int seteuid(uid_t euid);
@@ -121,6 +115,7 @@ void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void 
 
 void remove_thread_from_process(thread_t *thread);
 
+void kill_other_threads();
 void proc_kill(pending_signal_t *trigger);
 void proc_stop(pending_signal_t *trigger);
 void proc_continue(process_t *proc, pending_signal_t *trigger);

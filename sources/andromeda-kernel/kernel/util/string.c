@@ -57,3 +57,14 @@ void *memset(void *s, int c, size_t n) {
 
     return s;
 }
+
+size_t strnlen(const char *s, size_t maxlen) {
+    size_t len = 0;
+
+    while (maxlen--) {
+        if (!*s++) break;
+        len++;
+    }
+
+    return len;
+}

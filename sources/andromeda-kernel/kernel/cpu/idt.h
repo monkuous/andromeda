@@ -24,4 +24,7 @@ typedef struct {
     uint16_t ss;
 } idt_frame_t;
 
+[[noreturn]] void handle_fatal_exception(idt_frame_t *frame);
+[[noreturn]] void idt_return(idt_frame_t *frame); // frame must be allocated on the stack
+
 void init_idt();

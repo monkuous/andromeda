@@ -314,7 +314,7 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
     file->references = 1;
     file->path = path;
     file->inode = inode;
-    file->flags = flags & (O_ACCMODE | STATUS_FLAGS);
+    file->flags = flags & ((O_ACCMODE & ~O_PATH) | STATUS_FLAGS);
 
     int error = 0;
 

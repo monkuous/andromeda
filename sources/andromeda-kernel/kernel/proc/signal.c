@@ -43,7 +43,7 @@ void send_signal(process_t *process, thread_t *thread, siginfo_t *info) {
     }
 
     memcpy(&buf->info, info, sizeof(*buf));
-    buf->src = getuid();
+    buf->src = current->process->ruid;
 
     if (info->si_code == SIGCONT) proc_continue(process, buf);
 
@@ -106,7 +106,7 @@ retry:
 
     struct sigaction *action = &current->process->signal_handlers[i];
 
-    if (!force_default && action->sa_handler) {
+    if (!force_default && action->sa_handler != SIG_DFL) {
         idt_frame_t *regs = &current->regs;
 
         if ((action->sa_flags & SA_RESTART) && regs->vector == 0x20) {
@@ -170,7 +170,7 @@ retry:
             action->sa_handler = nullptr;
             action->sa_flags &= ~SA_SIGINFO;
         }
-    } else {
+    } else if (force_default || action->sa_handler != SIG_IGN) {
         signal_disp_t disp = get_default_disposition(i);
 
         switch (disp) {

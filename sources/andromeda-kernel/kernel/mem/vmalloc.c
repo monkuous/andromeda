@@ -11,7 +11,7 @@ void *vmalloc(size_t size) {
         size = (size + PAGE_MASK) & ~PAGE_MASK;
 
         uintptr_t addr = vmem_alloc(size);
-        pmap_alloc(addr, size, PMAP_WRITABLE);
+        pmap_alloc(addr, size, PMAP_WRITABLE, true);
         return (void *)addr;
     }
 

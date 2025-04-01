@@ -18,6 +18,12 @@ idt_entry:
     mov %esp, %eax
     and $~15, %esp
     call idt_dispatch
+    # fall through into idt_return
+.size idt_entry, . - idt_entry
+
+.globl idt_return
+.type idt_return, @function
+idt_return:
     mov %eax, %esp
 
     popal
@@ -27,7 +33,7 @@ idt_entry:
     popw %gs
     add $8, %esp
     iret
-.size idt_entry, . - idt_entry
+.size idt_return, . - idt_return
 
 .macro idt_thunk vec, errc=0
 1:

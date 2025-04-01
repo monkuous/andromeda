@@ -1,9 +1,12 @@
 #include "idt.h"
 #include "asm/cr.h"
 #include "cpu/gdt.h"
+#include "mem/layout.h"
+#include "mem/pmap.h"
 #include "proc/sched.h"
 #include "proc/signal.h"
 #include "util/panic.h"
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -26,7 +29,7 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
            ((uint64_t)dpl << 45);
 }
 
-[[noreturn]] static void handle_fatal_exception(idt_frame_t *frame, bool stack_info_valid) {
+[[noreturn]] static void do_handle_fatal(idt_frame_t *frame, bool stack_info_valid) {
     uint32_t esp;
     uint16_t ss;
 
@@ -69,6 +72,10 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
           ss);
 }
 
+[[noreturn]] void handle_fatal_exception(idt_frame_t *frame) {
+    do_handle_fatal(frame, frame->cs & 3);
+}
+
 [[noreturn]] static void handle_task_exception(uint32_t vector, tss_t *tss) {
     tss_t *prev;
 
@@ -98,7 +105,14 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
             .ss = prev->ss,
     };
 
-    handle_fatal_exception(&frame, true);
+    do_handle_fatal(&frame, true);
+}
+
+static void signal_or_fatal(idt_frame_t *frame, int signal) {
+    if (frame->eip >= KERN_VIRT_BASE) handle_fatal_exception(frame);
+
+    siginfo_t info = {.si_signo = signal};
+    send_signal(current->process, current, &info);
 }
 
 static void setup_task_exception(tss_t *tss, uint32_t vector, size_t stack_offset) {
@@ -139,7 +153,18 @@ void init_idt() {
     }
 
     switch (frame->vector) {
-    default: handle_fatal_exception(frame, frame->cs & 3); break;
+    case 0x00: signal_or_fatal(frame, SIGFPE); break;
+    case 0x01: signal_or_fatal(frame, SIGTRAP); break;
+    case 0x03: signal_or_fatal(frame, SIGTRAP); break;
+    case 0x06: signal_or_fatal(frame, SIGILL); break;
+    case 0x0a: signal_or_fatal(frame, SIGSEGV); break;
+    case 0x0b: signal_or_fatal(frame, SIGSEGV); break;
+    case 0x0c: signal_or_fatal(frame, SIGSEGV); break;
+    case 0x0d: signal_or_fatal(frame, SIGSEGV); break;
+    case 0x0e: handle_page_fault(frame); break;
+    case 0x10: signal_or_fatal(frame, SIGFPE); break;
+    case 0x13: signal_or_fatal(frame, SIGFPE); break;
+    default: handle_fatal_exception(frame); break;
     }
 
     if (frame->cs & 3) {

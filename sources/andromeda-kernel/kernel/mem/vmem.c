@@ -39,7 +39,7 @@ static void alloc_more_ranges() {
     allocating_ranges = true;
 
     uintptr_t addr = vmem_alloc(PAGE_SIZE);
-    pmap_alloc(addr, PAGE_SIZE, PMAP_WRITABLE);
+    pmap_alloc(addr, PAGE_SIZE, PMAP_WRITABLE, true);
 
     for (size_t i = 0; i < PAGE_SIZE / sizeof(struct vmem_range); i++) {
         struct vmem_range *range = (struct vmem_range *)addr;

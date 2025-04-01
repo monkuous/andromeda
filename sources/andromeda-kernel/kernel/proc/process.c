@@ -8,9 +8,9 @@
 #include "util/hash.h"
 #include "util/list.h"
 #include "util/panic.h"
-#include <abi-bits/signal.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -484,18 +484,6 @@ void remove_thread_from_process(thread_t *thread) {
     }
 }
 
-gid_t getegid() {
-    return current->process->egid;
-}
-
-uid_t geteuid() {
-    return current->process->euid;
-}
-
-gid_t getgid() {
-    return current->process->rgid;
-}
-
 int getgroups(int gidsetsize, gid_t grouplist[]) {
     process_t *p = current->process;
 
@@ -504,26 +492,6 @@ int getgroups(int gidsetsize, gid_t grouplist[]) {
 
     memcpy(grouplist, p->groups, p->ngroups * sizeof(*p->groups));
     return p->ngroups;
-}
-
-int getresgid(gid_t *restrict rgid, gid_t *restrict egid, gid_t *restrict sgid) {
-    process_t *p = current->process;
-    *rgid = p->rgid;
-    *egid = p->egid;
-    *sgid = p->sgid;
-    return 0;
-}
-
-int getresuid(uid_t *restrict ruid, uid_t *restrict euid, uid_t *restrict suid) {
-    process_t *p = current->process;
-    *ruid = p->ruid;
-    *euid = p->euid;
-    *suid = p->suid;
-    return 0;
-}
-
-uid_t getuid() {
-    return current->process->ruid;
 }
 
 int setegid(gid_t egid) {
@@ -665,6 +633,15 @@ relation_t get_relation(uid_t uid, gid_t gid, bool real) {
     return REL_OTHER;
 }
 
+void kill_other_threads() {
+    list_foreach(current->process->threads, thread_t, pnode, cur) {
+        if (cur != current) {
+            cur->should_exit = true;
+            sched_interrupt(cur);
+        }
+    }
+}
+
 void proc_kill(pending_signal_t *trigger) {
     ASSERT(current->process->wa_info.si_signo == 0);
     current->process->wa_info = (siginfo_t){
@@ -681,11 +658,15 @@ void proc_kill(pending_signal_t *trigger) {
     }
 }
 
+static bool should_send_sigstopcont() {
+    return current->process->parent && !(current->process->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDSTOP);
+}
+
 void proc_stop(pending_signal_t *trigger) {
     if (current->process->stopped) return;
     current->process->stopped = true;
 
-    if (!(current->process->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDSTOP)) {
+    if (should_send_sigstopcont()) {
         ASSERT(current->process->wa_info.si_signo == 0);
         current->process->wa_info = (siginfo_t){
                 .si_signo = SIGCHLD,
@@ -708,7 +689,7 @@ void proc_continue(process_t *proc, pending_signal_t *trigger) {
     if (!proc->stopped) return;
     proc->stopped = false;
 
-    if (trigger && !(current->process->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDSTOP)) {
+    if (trigger && should_send_sigstopcont()) {
         ASSERT(current->process->wa_info.si_signo == 0);
         current->process->wa_info = (siginfo_t){
                 .si_signo = SIGCHLD,

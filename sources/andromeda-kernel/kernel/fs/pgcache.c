@@ -4,6 +4,8 @@
 #include "mem/pmem.h"
 #include "mem/usermem.h"
 #include "mem/vmalloc.h"
+#include "mem/vmm.h"
+#include "proc/sched.h"
 #include "string.h"
 #include "util/container.h"
 #include "util/list.h"
@@ -121,8 +123,26 @@ static size_t levels_for_size(uint64_t size) {
     return (bits + (LEVEL_SHIFT - 1)) / LEVEL_SHIFT;
 }
 
-static void handle_eviction(pgcache_t *, page_t *) {
-    // TODO: Unmap
+static void handle_eviction(pgcache_t *cache, page_t *page) {
+    vm_t *orig = current->vm;
+    vm_t *vm = orig;
+
+    uint64_t offset = page->cache.index << PAGE_SHIFT;
+
+    list_foreach(cache->mappings, vm_region_t, snode, region) {
+        if (offset < region->offset) continue;
+        uint64_t pvirt = region->head + (offset - region->offset);
+        if (pvirt > region->tail) continue;
+
+        if (region->vm != vm) {
+            switch_pmap(&region->vm->pmap);
+            vm = region->vm;
+        }
+
+        pmap_unmap(pvirt, PAGE_SIZE);
+    }
+
+    if (vm != orig) switch_pmap(&current->vm->pmap);
 }
 
 static void free_entry(pgcache_t *cache, void *ptr, size_t level, bool evictable) {
@@ -208,6 +228,8 @@ void pgcache_evict_specific(page_t *page) {
 
     [[maybe_unused]] page_t *deleted = cache_del(page->cache.cache, page->cache.index);
     ASSERT(deleted == page);
+
+    page->is_cache = false;
 }
 
 int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {

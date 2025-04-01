@@ -17,6 +17,9 @@ typedef struct [[gnu::aligned(32)]] page {
             size_t count;
         } free;
         struct {
+            size_t references;
+        } anon;
+        struct {
             list_node_t lru_node;
             struct pgcache *cache;
             uint64_t index;
@@ -34,7 +37,10 @@ extern page_t *page_array;
 extern pmem_stats_t pmem_stats;
 
 uint32_t pmem_alloc_simple();
+
+// might evict 1 page, but no more than that, and the data of the evicted page is untouched
 page_t *pmem_alloc(bool cache);
+
 void pmem_free(page_t *page, bool cache);
 
 page_t *pmem_alloc_slow(size_t count, uint32_t max_addr);

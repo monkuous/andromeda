@@ -229,7 +229,7 @@ void bootmem_handover() {
     uintptr_t parr_vtail_aligned = parr_vtail | PAGE_MASK;
 
     if (parr_vhead_aligned < parr_vtail_aligned) {
-        pmap_alloc(parr_vhead_aligned, parr_vtail_aligned - parr_vhead_aligned + 1, PMAP_WRITABLE);
+        pmap_alloc(parr_vhead_aligned, parr_vtail_aligned - parr_vhead_aligned + 1, PMAP_WRITABLE, false);
     }
 
     // set is_free to 0 for all pages

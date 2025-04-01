@@ -19,3 +19,7 @@ static inline uint32_t read_cr3() {
     asm volatile("mov %%cr3, %0" : "=r"(value));
     return value;
 }
+
+static inline void write_cr3(uint32_t value) {
+    asm("mov %0, %%cr3" ::"r"(value) : "memory");
+}

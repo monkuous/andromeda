@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mem/pmem.h"
+#include "util/list.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,6 +17,8 @@ struct pgcache {
 
     void *data;
     size_t levels;
+
+    list_t mappings;
 };
 
 // NOTE: If `create` is false, the function may indicate success when returning
@@ -29,5 +32,7 @@ int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t of
 
 void pgcache_resize(pgcache_t *cache, uint64_t size);
 
+// the data of the evicted page is untouched
 page_t *pgcache_evict();
+
 void pgcache_evict_specific(page_t *page);

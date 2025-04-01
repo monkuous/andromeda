@@ -25,6 +25,8 @@ kernel_elf = executable(
     'mem/usermem.S',
     'mem/vmalloc.c',
     'mem/vmem.c',
+    'mem/vmm.c',
+    'proc/exec.c',
     'proc/process.c',
     'proc/sched.c',
     'proc/signal.c',

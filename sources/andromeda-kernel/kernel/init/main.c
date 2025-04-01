@@ -11,9 +11,12 @@
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
 #include "mem/pmap.h"
+#include "proc/exec.h"
 #include "proc/process.h"
+#include "proc/sched.h"
 #include "util/panic.h"
 #include "util/print.h"
+#include <andromeda/string.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <sys/stat.h>
@@ -73,6 +76,8 @@ static dev_t get_boot_volume() {
 }
 
 static void mount_boot() {
+    printk("kernel: mounting /boot\n");
+
     bdev_t *bdev = resolve_bdev(get_boot_volume());
     if (unlikely(!bdev)) panic("failed to resolve boot volume");
 
@@ -81,6 +86,8 @@ static void mount_boot() {
 }
 
 static void mount_initrd() {
+    printk("kernel: mounting initrd\n");
+
     dev_t loopback_dev;
 
     file_t *file;
@@ -117,6 +124,23 @@ static void chroot_to_initrd() {
     file_deref(file);
 }
 
+[[noreturn]] static void run_init() {
+    static const andromeda_tagged_string_t init_name = {"/sbin/init", 10};
+
+    printk("kernel: starting /sbin/init\n");
+
+    file_t *file;
+    int error = vfs_open(&file, nullptr, init_name.data, init_name.length, O_RDONLY, 0);
+    if (unlikely(error)) panic("failed to open %S (%d)", init_name.data, init_name.length, error);
+
+    error = execute(file, &init_name, 1, nullptr, 0);
+    file_deref(file);
+    if (unlikely(error)) panic("failed to start init process (%d)", error);
+
+    idt_frame_t frame = current->regs;
+    idt_return(&frame);
+}
+
 [[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
     init_pmap();
     init_gdt();
@@ -131,6 +155,5 @@ static void chroot_to_initrd() {
     mount_boot();
     mount_initrd();
     chroot_to_initrd();
-
-    panic("TODO");
+    run_init();
 }
