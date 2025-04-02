@@ -130,8 +130,9 @@ void inode_deref(inode_t *inode) {
     inode->filesystem->indirect_refs -= 1;
 
     if (--inode->references == 0) {
+        pgcache_resize(&inode->data, 0);
+
         switch (inode->mode & S_IFMT) {
-        case S_IFREG: pgcache_resize(&inode->data, 0); break;
         case S_IFLNK: vmfree(inode->symlink, inode->size); break;
         }
 
