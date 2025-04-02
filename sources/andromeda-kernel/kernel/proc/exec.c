@@ -153,7 +153,8 @@ static int load_elf(file_t *file, struct elf_data *out, bool require_dyn) {
         size_t pgoff = phdr->p_vaddr & PAGE_MASK;
 
         uintptr_t map_addr = phdr->p_vaddr + slide - pgoff;
-        size_t map_size = (phdr->p_memsz + pgoff + PAGE_MASK) & ~PAGE_MASK;
+        size_t zero_size = phdr->p_memsz + pgoff;
+        size_t map_size = (zero_size + PAGE_MASK) & ~PAGE_MASK;
         int prot = 0;
 
         if (phdr->p_flags & PF_R) prot |= PROT_READ;
@@ -163,7 +164,7 @@ static int load_elf(file_t *file, struct elf_data *out, bool require_dyn) {
         if (phdr->p_filesz) {
             size_t data_size = phdr->p_filesz + pgoff;
             size_t fmap_size = (data_size + PAGE_MASK) & ~PAGE_MASK;
-            bool need_write = data_size != fmap_size;
+            bool need_write = data_size < zero_size && data_size != fmap_size;
 
             error = vm_map(
                     &map_addr,
@@ -176,7 +177,9 @@ static int load_elf(file_t *file, struct elf_data *out, bool require_dyn) {
             if (unlikely(error)) goto error;
 
             if (need_write) {
-                error = user_memset((void *)(map_addr + data_size), 0, fmap_size - data_size);
+                size_t count = (zero_size <= fmap_size ? zero_size : fmap_size) - data_size;
+
+                error = user_memset((void *)(map_addr + data_size), 0, count);
                 if (unlikely(error)) goto error;
 
                 if (!(prot & PROT_WRITE)) {
