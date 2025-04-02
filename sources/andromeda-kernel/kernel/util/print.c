@@ -105,6 +105,10 @@ static size_t do_printk(printk_sink_t sink, void *ctx, const char *format, va_li
             case 'u': total += printu(sink, ctx, va_arg(args, unsigned), min_digits); break;
             case 'x': total += printx(sink, ctx, va_arg(args, unsigned), min_digits); break;
             case 'X': total += printx(sink, ctx, va_arg(args, uint64_t), min_digits); break;
+            case 'p':
+                total += printS(sink, ctx, "0x", 2);
+                total += printx(sink, ctx, (uintptr_t)va_arg(args, void *), 0);
+                break;
             default:
                 format = start;
                 total += printc(sink, ctx, '%');

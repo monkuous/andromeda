@@ -162,9 +162,11 @@ uint32_t bootmem_alloc() {
         if (alloc_tail >= KERN_PHYS_BASE && alloc_tail - PAGE_MASK < KERN_TO_PHYS((uintptr_t)&_end)) {
             alloc_tail = (KERN_PHYS_BASE - PAGE_SIZE) | PAGE_MASK;
         }
+        if (alloc_tail < PAGE_MASK) continue;
 
         uint32_t alloc_head = alloc_tail - PAGE_MASK;
         if (alloc_head <= (0x600 | PAGE_MASK)) continue;
+        if (alloc_head < region->head) continue;
 
         max_alloc_idx = i;
         max_alloc_tail = alloc_head - 1;
@@ -179,7 +181,7 @@ static void iter_usable_regions_aligned(void (*func)(uint64_t, uint64_t, void *)
         mem_region_t *region = &memory_map[i];
         if (region->type != MEM_USABLE) continue;
 
-        uint64_t aligned_head = (region->head + PAGE_MASK) & ~PAGE_MASK;
+        uint64_t aligned_head = (region->head + PAGE_MASK) & ~(uint64_t)PAGE_MASK;
         if (region->head > aligned_head) continue;
 
         uint64_t aligned_tail = (region->tail - PAGE_MASK) | PAGE_MASK;
@@ -192,12 +194,15 @@ static void iter_usable_regions_aligned(void (*func)(uint64_t, uint64_t, void *)
 }
 
 struct find_bounds_ctx {
-    uint64_t cur_head;
-    uint64_t cur_tail;
+    uint32_t cur_head;
+    uint32_t cur_tail;
 };
 
 static void find_bounds(uint64_t head, uint64_t tail, void *ptr) {
     struct find_bounds_ctx *ctx = ptr;
+
+    if (tail > UINT32_MAX) tail = UINT32_MAX;
+    if (head > tail) return;
 
     if (head < ctx->cur_head) ctx->cur_head = head;
     if (tail > ctx->cur_tail) ctx->cur_tail = tail;
@@ -213,10 +218,9 @@ static void add_regions(uint64_t head, uint64_t tail, void *) {
 void bootmem_handover() {
     mmap_frozen = true;
 
-    struct find_bounds_ctx bounds = {UINT64_MAX, 0};
+    struct find_bounds_ctx bounds = {UINT32_MAX, 0};
     iter_usable_regions_aligned(find_bounds, &bounds);
 
-    if (bounds.cur_tail > UINT32_MAX) bounds.cur_tail = UINT32_MAX;
     if (bounds.cur_head > bounds.cur_tail) panic("no usable memory");
 
     size_t page_base = bounds.cur_head >> PAGE_SHIFT;
@@ -232,7 +236,7 @@ void bootmem_handover() {
         pmap_alloc(parr_vhead_aligned, parr_vtail_aligned - parr_vhead_aligned + 1, PMAP_WRITABLE, false);
     }
 
-    // set is_free to 0 for all pages
+    // set is_free and is_cache to 0 for all pages
     memset((void *)parr_vhead, 0, parr_size);
 
     max_alloc_idx = 0; // disable bootmem_alloc
