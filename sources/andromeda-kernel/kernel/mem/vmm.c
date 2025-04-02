@@ -458,7 +458,7 @@ static vm_region_t *get_next(vm_t *vm, vm_region_t *prev) {
 #define SHARED_WRITE (HYDROGEN_MEM_SHARED | HYDROGEN_MEM_WRITE)
 
 static void process_unmap(uintptr_t head, uintptr_t tail) {
-    pmap_unmap(head, tail - head + 1);
+    pmap_unmap(head, tail - head + 1, false);
 }
 
 static int remove_overlapping_regions(
@@ -880,7 +880,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
         if (prot) {
             pmap_remap(region->head, region->tail - region->head + 1, prot & PROT_WRITE ? PMAP_WRITABLE : 0);
         } else {
-            pmap_unmap(region->head, region->tail - region->head + 1);
+            pmap_unmap(region->head, region->tail - region->head + 1, false);
         }
 
         cur = container(vm_region_t, node, cur->node.next);

@@ -446,7 +446,7 @@ void pmap_remap(uintptr_t virt, size_t size, uint32_t flags) {
     }
 }
 
-void pmap_unmap(uintptr_t virt, size_t size) {
+void pmap_unmap(uintptr_t virt, size_t size, bool skip_anon) {
     ASSERT(!((virt | size) & PAGE_MASK));
     ASSERT(size);
 
@@ -471,7 +471,7 @@ void pmap_unmap(uintptr_t virt, size_t size) {
             while (pti <= pti_end) {
                 uint32_t pte = *table;
 
-                if (pte) {
+                if (pte && (!skip_anon || !(pte & PTE_ANON))) {
                     *table = 0;
                     invlpg((uintptr_t)table << 10);
                     handle_unmap(pte);

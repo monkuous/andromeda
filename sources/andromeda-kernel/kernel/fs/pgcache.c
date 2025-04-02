@@ -139,7 +139,7 @@ static void handle_eviction(pgcache_t *cache, page_t *page) {
             vm = region->vm;
         }
 
-        pmap_unmap(pvirt, PAGE_SIZE);
+        pmap_unmap(pvirt, PAGE_SIZE, true);
     }
 
     if (vm != orig) switch_pmap(&current->vm->pmap);

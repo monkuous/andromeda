@@ -23,6 +23,6 @@ void pmap_map(uintptr_t virt, uint32_t phys, size_t size, uint32_t flags);
 void pmap_alloc(uintptr_t virt, size_t size, uint32_t flags, bool anon);
 void pmap_clone(pmap_t *out, uintptr_t virt, size_t size, bool cow);
 void pmap_remap(uintptr_t virt, size_t size, uint32_t flags);
-void pmap_unmap(uintptr_t virt, size_t size);
+void pmap_unmap(uintptr_t virt, size_t size, bool skip_anon);
 
 void *pmap_tmpmap(uint32_t phys);

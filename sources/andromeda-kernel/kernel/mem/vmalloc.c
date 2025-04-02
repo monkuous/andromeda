@@ -24,7 +24,7 @@ void vmfree(void *ptr, size_t size) {
         size = (size + PAGE_MASK) & ~PAGE_MASK;
 
         uintptr_t addr = (uintptr_t)ptr;
-        pmap_unmap(addr, size);
+        pmap_unmap(addr, size, false);
         vmem_free(addr, size);
         return;
     }
