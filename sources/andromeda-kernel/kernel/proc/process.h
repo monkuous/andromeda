@@ -135,3 +135,7 @@ void fd_free(int fd);
 int fd_lookup(file_t **out, int fd);
 int fd_free_checked(int fd);
 
+int fd_fcntl(int fd, int cmd, uintptr_t arg);
+
+int fd_allocassoc(int fd, file_t *file, int flags);
+

@@ -34,8 +34,8 @@ struct vm {
     list_t regions;
 };
 
-vm_t *vm_create(void);
-vm_t *vm_clone(void);
+vm_t *vm_create();
+vm_t *vm_clone();
 void vm_free(vm_t *vm);
 
 int vm_map(uintptr_t *addr, size_t size, int flags, int prot, file_t *file, uint64_t offset);

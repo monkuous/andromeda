@@ -76,6 +76,10 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(CLOSE, 1)
         SYSHANDLER32(EXIT, 1)
         SYSHANDLER32(WRITE, 3)
+        SYSHANDLER32(IOCTL, 3)
+        SYSHANDLER32(FCNTL, 3)
+        SYSHANDLER32(DUP, 2)
+        SYSHANDLER32(DUP2, 3)
     default:
 #if LOG_SYSCALLS
         printk("syscall: unknown syscall %u\n", frame->eax);

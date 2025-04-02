@@ -1,10 +1,13 @@
 #pragma once
 
 #include "fs/pgcache.h"
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#define FL_STATUS_FLAGS (O_APPEND | O_DSYNC | O_NONBLOCK | O_RSYNC | O_SYNC)
 
 typedef struct dentry dentry_t;
 typedef struct file file_t;
@@ -44,6 +47,7 @@ typedef struct {
     int (*read)(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos);
     int (*write)(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos);
     void (*mmap)(file_t *self, uintptr_t head, uintptr_t tail, uint64_t offset, int flags);
+    int (*ioctl)(file_t *self, unsigned long request, void *arg);
 } file_ops_t;
 
 struct file {
@@ -178,5 +182,6 @@ ssize_t vfs_read(file_t *file, void *buffer, ssize_t size);
 ssize_t vfs_write(file_t *file, const void *buffer, ssize_t size);
 ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset);
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset);
+int vfs_ioctl(file_t *file, unsigned long request, void *arg);
 
 size_t vfs_alloc_path(void **out, dentry_t *entry);

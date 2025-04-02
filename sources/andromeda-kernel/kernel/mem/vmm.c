@@ -310,7 +310,7 @@ static void tree_mov(vm_t *vm, vm_region_t *region, uintptr_t new_head) {
     }
 }
 
-vm_t *vm_create(void) {
+vm_t *vm_create() {
     vm_t *vm = vmalloc(sizeof(*vm));
     memset(vm, 0, sizeof(*vm));
     vm->references = 1;
@@ -402,7 +402,7 @@ static void clone_regions(vm_t *dst) {
     }
 }
 
-vm_t *vm_clone(void) {
+vm_t *vm_clone() {
     vm_t *vm = vm_create();
     clone_regions(vm);
     return vm;

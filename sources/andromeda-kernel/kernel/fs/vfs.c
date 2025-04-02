@@ -19,7 +19,6 @@
 #include <unistd.h>
 
 #define OPEN_FLAGS (O_CLOEXEC | O_CREAT | O_DIRECTORY | O_EXCL | O_NOCTTY | O_NOFOLLOW | O_TRUNC | O_PATH)
-#define STATUS_FLAGS (O_APPEND | O_DSYNC | O_NONBLOCK | O_RSYNC | O_SYNC)
 #define PERM_BITS (S_IRWXU | S_IRWXG | S_IRWXO)
 #define MODE_BITS (S_ISUID | S_ISGID | S_ISVTX | PERM_BITS)
 
@@ -314,7 +313,7 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
     file->references = 1;
     file->path = path;
     file->inode = inode;
-    file->flags = flags & ((O_ACCMODE & ~O_PATH) | STATUS_FLAGS);
+    file->flags = flags & ((O_ACCMODE & ~O_PATH) | FL_STATUS_FLAGS);
 
     int error = 0;
 
@@ -591,7 +590,7 @@ mode_t vfs_umask(mode_t cmask) {
 }
 
 int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int flags, mode_t mode) {
-    if (unlikely(flags & ~(O_ACCMODE | STATUS_FLAGS | OPEN_FLAGS))) return EINVAL;
+    if (unlikely(flags & ~(O_ACCMODE | FL_STATUS_FLAGS | OPEN_FLAGS))) return EINVAL;
     if (unlikely(mode & ~MODE_BITS)) return EINVAL;
     mode &= ~current->process->umask;
 
@@ -1356,6 +1355,12 @@ static size_t format_path(unsigned char *buffer, size_t length, dentry_t *entry)
 
     ASSERT(length == 0);
     return tot;
+}
+
+int vfs_ioctl(file_t *file, unsigned long request, void *arg) {
+    if (unlikely(!file->ops->ioctl)) return -ENOTTY;
+
+    return file->ops->ioctl(file, request, arg);
 }
 
 size_t vfs_alloc_path(void **out, dentry_t *entry) {

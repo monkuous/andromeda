@@ -10,6 +10,7 @@
 #include "util/list.h"
 #include "util/panic.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
@@ -737,31 +738,41 @@ void proc_continue(process_t *proc, pending_signal_t *trigger) {
     }
 }
 
-int fd_alloc() {
+static void expand_fds(process_t *proc) {
+    size_t new_cap = proc->fds_cap ? proc->fds_cap * 2 : 8;
+    size_t old_size = sizeof(*proc->fds) * proc->fds_cap;
+    size_t new_size = sizeof(*proc->fds) * new_cap;
+
+    void *new_table = vmalloc(new_size);
+    memcpy(new_table, proc->fds, old_size);
+    memset(new_table + old_size, 0, new_size - old_size);
+    vmfree(proc->fds, old_size);
+
+    proc->fds = new_table;
+    proc->fds_cap = new_cap;
+}
+
+static int do_fd_alloc(unsigned min) {
     process_t *proc = current->process;
+    unsigned cur = min >= proc->fds_start ? min : proc->fds_start;
 
-    while (proc->fds_start != INT_MAX) {
-        if (proc->fds_start >= proc->fds_cap) {
-            size_t new_cap = proc->fds_cap ? proc->fds_cap * 2 : 8;
-            size_t old_size = sizeof(*proc->fds) * proc->fds_cap;
-            size_t new_size = sizeof(*proc->fds) * new_cap;
-            void *new_table = vmalloc(new_size);
-            memcpy(new_table, proc->fds, old_size);
-            memset(new_table + old_size, 0, new_size - old_size);
-            vmfree(proc->fds, old_size);
-            proc->fds = new_table;
-            proc->fds_cap = new_cap;
+    while (cur != INT_MAX) {
+        if (cur >= proc->fds_cap) expand_fds(proc);
+        if (cur == proc->fds_start) proc->fds_start += 1;
+
+        if (!proc->fds[cur].file) {
+            proc->fds[cur].file = FD_RESERVED;
+            return cur;
         }
 
-        if (!proc->fds[proc->fds_start].file) {
-            proc->fds[proc->fds_start].file = FD_RESERVED;
-            return proc->fds_start++;
-        }
-
-        proc->fds_start += 1;
+        cur += 1;
     }
 
     return -EMFILE;
+}
+
+int fd_alloc() {
+    return do_fd_alloc(0);
 }
 
 void fd_assoc(int fd, file_t *file, int flags) {
@@ -797,7 +808,8 @@ int fd_lookup(file_t **out, int fd) {
     if (unlikely((unsigned)fd >= proc->fds_cap)) return EBADF;
 
     file_t *file = proc->fds[fd].file;
-    if (unlikely(!file || file == FD_RESERVED)) return EBADF;
+    if (unlikely(!file)) return EBADF;
+    ASSERT(file != FD_RESERVED);
 
     *out = file;
     file_ref(file);
@@ -811,12 +823,66 @@ int fd_free_checked(int fd) {
 
     struct fd *fds = &proc->fds[fd];
     file_t *file = fds->file;
-    if (unlikely(!file || file == FD_RESERVED)) return EBADF;
+    if (unlikely(!file)) return EBADF;
+    ASSERT(file != FD_RESERVED);
 
     file_deref(file);
     fds->file = nullptr;
     fds->flags = 0;
 
     if ((unsigned)fd < proc->fds_start) proc->fds_start = fd;
+    return 0;
+}
+
+static int do_dupfd(struct fd *fd, int min, int flags) {
+    if (unlikely(min < 0)) return -EINVAL;
+
+    int nfd = do_fd_alloc(min);
+    if (likely(nfd >= 0)) fd_assoc(nfd, fd->file, flags);
+
+    return nfd;
+}
+
+#define VALID_FD_FLAGS (FD_CLOEXEC)
+
+int fd_fcntl(int fd, int cmd, uintptr_t arg) {
+    process_t *proc = current->process;
+    if (unlikely(fd < 0)) return -EBADF;
+    if (unlikely((unsigned)fd >= proc->fds_cap)) return -EBADF;
+
+    struct fd *fds = &proc->fds[fd];
+    if (unlikely(!fds->file)) return -EBADF;
+    ASSERT(fds->file != FD_RESERVED);
+
+    switch (cmd) {
+    case F_DUPFD: return do_dupfd(fds, arg, 0);
+    case F_GETFD: return fds->flags;
+    case F_SETFD: fds->flags = arg & VALID_FD_FLAGS; return 0;
+    case F_GETFL: return fds->file->flags;
+    case F_SETFL: fds->file->flags = (fds->file->flags & O_ACCMODE) | (arg & FL_STATUS_FLAGS); return 0;
+    case F_DUPFD_CLOEXEC: return do_dupfd(fds, arg, FD_CLOEXEC);
+    default: return -EINVAL;
+    }
+}
+
+int fd_allocassoc(int fd, file_t *file, int flags) {
+    if (unlikely(fd < 0)) return EINVAL;
+    if (unlikely(fd > INT_MAX)) return EMFILE;
+
+    process_t *proc = current->process;
+    while (proc->fds_cap < (unsigned)fd) expand_fds(proc);
+
+    struct fd *fds = &proc->fds[fd];
+
+    if (fds->file) {
+        ASSERT(fds->file != FD_RESERVED);
+        file_deref(fds->file);
+    }
+
+    fds->file = file;
+    fds->flags = flags;
+    file_ref(file);
+
+    if (proc->fds_start == (unsigned)fd) proc->fds_start++;
     return 0;
 }
