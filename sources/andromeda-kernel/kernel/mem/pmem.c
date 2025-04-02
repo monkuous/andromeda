@@ -165,7 +165,39 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
             }
         }
 
-        memset(base, 0, count); // set is_free and is_cache to 0 for all pages
+        // take the pages off of the free list
+        page_t *prev = nullptr;
+        page_t *cur = free_pages;
+
+        page_t *amax = base + (count - 1);
+
+        while (cur) {
+            page_t *cmax = cur + (cur->free.count - 1);
+
+            if (base <= cmax && amax >= cur) {
+                if (amax < cmax) {
+                    page_t *nmin = amax + 1;
+                    nmin->free.count = cmax - amax;
+                    nmin->free.next = cur->free.next;
+                    cur->free.next = nmin;
+                }
+
+                if (cur < base) {
+                    cur->free.count = base - cur;
+                    prev = cur;
+                } else if (prev) {
+                    prev->free.next = cur->free.next;
+                } else {
+                    free_pages = cur->free.next;
+                }
+            } else {
+                prev = cur;
+            }
+
+            cur = cur->free.next;
+        }
+
+        memset(base, 0, count * sizeof(*base)); // set is_free and is_cache to 0 for all pages
         pmem_stats.alloc += count;
 
         ctx->page = base;
