@@ -239,6 +239,7 @@ void bootmem_handover() {
     page_array = (page_t *)parr_vhead - page_base;
 
     iter_usable_regions_aligned(add_regions, nullptr);
+    init_pmap();
 
     // leave one page unmapped as a guard page
     if (KERN_PHYS_BASE > 2 * PAGE_SIZE) {

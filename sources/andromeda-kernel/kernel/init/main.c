@@ -10,7 +10,6 @@
 #include "init/bios.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
-#include "mem/pmap.h"
 #include "proc/exec.h"
 #include "proc/process.h"
 #include "proc/sched.h"
@@ -142,7 +141,6 @@ static void chroot_to_initrd() {
 }
 
 [[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
-    init_pmap();
     init_gdt();
     init_idt();
     init_video();

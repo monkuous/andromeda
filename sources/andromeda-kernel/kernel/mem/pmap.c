@@ -43,6 +43,9 @@ static inline void invlpg(uintptr_t addr) {
 void init_pmap() {
     kernel_pd_phys = (uintptr_t)kernel_page_dir - KERN_VIRT_BASE;
     temp_map_pte = (uint32_t *)(PTBL_VIRT_BASE | ((uintptr_t)temp_map_page >> 10));
+    *temp_map_pte = 0;
+    invlpg((uintptr_t)temp_map_page);
+    pmem_free(phys_to_page((uintptr_t)temp_map_page - KERN_VIRT_BASE), false);
 }
 
 void create_pmap(pmap_t *pmap) {
@@ -122,9 +125,6 @@ static uint32_t do_cow(uint32_t pte, uintptr_t addr) {
 
         // this check is necessary to prevent a 2nd page fault from occurring
         // if pmem_alloc evicted the page we're copying
-        //
-        // using user_memcpy wouldn't work in that case either, since the 2nd
-        // page fault might use pmap_tmpmap and invalidate the temporary mapping
         if (phys != (pte & PTE_ADDR)) {
             memcpy(pmap_tmpmap(phys), (const void *)(addr & ~PAGE_MASK), PAGE_SIZE);
         }
@@ -196,15 +196,21 @@ static bool fix_user_fault(idt_frame_t *frame, uintptr_t addr) {
     uint32_t *ptep = (uint32_t *)(PTBL_VIRT_BASE | ((addr >> 10) & ~3));
     uint32_t pte = *ptep;
 
+    uint32_t tmpmap = *temp_map_pte;
+
     if (write && (pte & PTE_COW)) {
         *ptep = do_cow(pte, addr);
         invlpg(addr);
-        return true;
+    } else {
+        ASSERT(!pte);
+        create_mapping(frame, region, addr, ptep, write);
     }
 
-    ASSERT(!pte);
+    if (tmpmap != *temp_map_pte) {
+        *temp_map_pte = tmpmap;
+        invlpg((uintptr_t)temp_map_page);
+    }
 
-    create_mapping(frame, region, addr, ptep, write);
     return true;
 }
 
