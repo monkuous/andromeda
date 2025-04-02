@@ -302,7 +302,7 @@ int access_file(file_t *file, int amode) {
     case O_RDONLY: avail = R_OK; break;
     case O_WRONLY: avail = W_OK; break;
     case O_RDWR: avail = R_OK | W_OK; break;
-    default: avail = 0; break;
+    default: return EACCES;
     }
 
     return (avail & amode) == amode ? 0 : EACCES;
@@ -314,26 +314,28 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
     file->references = 1;
     file->path = path;
     file->inode = inode;
-    file->flags = flags & ((O_ACCMODE & ~O_PATH) | FL_STATUS_FLAGS);
+    file->flags = flags & (O_ACCMODE | FL_STATUS_FLAGS);
 
-    int error = 0;
+    if (!(flags & O_PATH)) {
+        int error = 0;
 
-    switch (inode->mode & S_IFMT) {
-    case S_IFDIR: file->ops = inode->directory; break;
-    case S_IFREG:
-        file->ops = &regular_file_ops;
-        if ((flags & O_TRUNC) && !access_file(file, W_OK) && inode->size != 0) {
-            error = inode->ops->regular.truncate(inode, 0);
+        switch (inode->mode & S_IFMT) {
+        case S_IFDIR: file->ops = inode->directory; break;
+        case S_IFREG:
+            file->ops = &regular_file_ops;
+            if ((flags & O_TRUNC) && !access_file(file, W_OK) && inode->size != 0) {
+                error = inode->ops->regular.truncate(inode, 0);
+            }
+            break;
+        case S_IFBLK: error = open_bdev(inode->device, file, flags); break;
+        case S_IFCHR: error = open_cdev(inode->device, file, flags); break;
+        default: error = ELOOP; break;
         }
-        break;
-    case S_IFBLK: error = open_bdev(inode->device, file, flags); break;
-    case S_IFCHR: error = open_cdev(inode->device, file, flags); break;
-    default: error = ELOOP; break;
-    }
 
-    if (unlikely(error)) {
-        vmfree(file, sizeof(*file));
-        return error;
+        if (unlikely(error)) {
+            vmfree(file, sizeof(*file));
+            return error;
+        }
     }
 
     if (path) dentry_ref(path);
@@ -604,6 +606,8 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
     default: return EINVAL;
     }
 
+    if (flags & O_PATH) flags &= O_PATH | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW;
+
     int rflags = 0;
 
     if (!(flags & (O_NOFOLLOW | O_EXCL))) rflags |= RESOLVE_FOLLOW_SYMLINKS;
@@ -649,8 +653,10 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
             goto exit;
         }
 
-        error = access_inode(entry->inode, amode, false);
-        if (unlikely(error)) goto exit;
+        if (!(flags & O_PATH)) {
+            error = access_inode(entry->inode, amode, false);
+            if (unlikely(error)) goto exit;
+        }
     }
 
     ASSERT(entry->inode);
@@ -1277,6 +1283,7 @@ int vfs_fchmod(file_t *file, mode_t mode) {
 }
 
 off_t vfs_seek(file_t *file, off_t offset, int whence) {
+    if (unlikely(!file->ops)) return -EBADF;
     if (unlikely(!file->ops->seek)) return -ESPIPE;
 
     uint64_t pos = (int64_t)offset;
@@ -1359,6 +1366,7 @@ static size_t format_path(unsigned char *buffer, size_t length, dentry_t *entry)
 }
 
 int vfs_ioctl(file_t *file, unsigned long request, void *arg) {
+    if (unlikely(!file->ops)) return -EBADF;
     if (unlikely(!file->ops->ioctl)) return -ENOTTY;
 
     return file->ops->ioctl(file, request, arg);

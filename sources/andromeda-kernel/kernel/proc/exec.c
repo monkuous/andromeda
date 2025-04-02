@@ -503,7 +503,10 @@ int execute(
 ) {
     if (unlikely(!S_ISREG(file->inode->mode))) return EACCES;
 
-    int error = access_inode(file->inode, X_OK, false);
+    int error = access_file(file, R_OK);
+    if (unlikely(error)) return error;
+
+    error = access_inode(file->inode, X_OK, false);
     if (unlikely(error)) return error;
 
     struct eproc_data eproc_data;

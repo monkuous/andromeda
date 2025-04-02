@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#define FL_STATUS_FLAGS (O_APPEND | O_DSYNC | O_NONBLOCK | O_RSYNC | O_SYNC)
+#define FL_STATUS_FLAGS (O_PATH | O_APPEND | O_DSYNC | O_NONBLOCK | O_RSYNC | O_SYNC)
 
 typedef struct dentry dentry_t;
 typedef struct file file_t;
