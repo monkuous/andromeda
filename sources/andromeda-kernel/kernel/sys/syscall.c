@@ -1,10 +1,12 @@
 #include "syscall.h"
 #include "compiler.h"
 #include "mem/layout.h"
-#include "sys/fs.h"     /* IWYU pragma: keep */
-#include "sys/memory.h" /* IWYU pragma: keep */
-#include "sys/misc.h"   /* IWYU pragma: keep */
-#include "sys/thread.h" /* IWYU pragma: keep */
+#include "proc/sched.h"
+#include "sys/fs.h"      /* IWYU pragma: keep */
+#include "sys/memory.h"  /* IWYU pragma: keep */
+#include "sys/misc.h"    /* IWYU pragma: keep */
+#include "sys/process.h" /* IWYU pragma: keep*/
+#include "sys/thread.h"  /* IWYU pragma: keep */
 #include <andromeda/syscall.h>
 #include <errno.h>
 #include <stdint.h>
@@ -62,8 +64,8 @@ static int64_t log_post_syscall(int64_t value, [[maybe_unused]] const char *name
 
 #define SYSWRAP(name, n, x, ...)                                                                                       \
     ({                                                                                                                 \
-        log_pre_syscall(#name, n, __VA_ARGS__);                                                                        \
-        log_post_syscall(x(__VA_ARGS__), #name, n, __VA_ARGS__);                                                       \
+        log_pre_syscall(#name, n, ##__VA_ARGS__);                                                                      \
+        log_post_syscall(x(__VA_ARGS__), #name, n, ##__VA_ARGS__);                                                     \
     })
 #else
 #define SYSWRAP(name, n, x, ...) (x(__VA_ARGS__))
@@ -76,15 +78,27 @@ void handle_syscall(idt_frame_t *frame) {
 #define SYSHANDLER3(name) SYSWRAP(name, 3, sys_##name, frame->ebx, frame->ecx, frame->edx)
 #define SYSHANDLER4(name) SYSWRAP(name, 4, sys_##name, frame->ebx, frame->ecx, frame->edx, frame->esi)
 #define SYSHANDLER5(name) SYSWRAP(name, 5, sys_##name, frame->ebx, frame->ecx, frame->edx, frame->esi, frame->edi)
+#define SYSHANDLER6(name)                                                                                              \
+    SYSWRAP(name, 6, sys_##name, frame->ebx, frame->ecx, frame->edx, frame->esi, frame->edi, frame->ebp)
 
     switch (frame->eax) {
 #define SYSHANDLER32(name, num)                                                                                        \
-    case SYS_##name: frame->eax = SYSHANDLER##num(name); break;
+    case SYS_##name: {                                                                                                 \
+        int ret = SYSHANDLER##num(name);                                                                               \
+        if (frame->vector == 0x20) frame->eax = ret;                                                                   \
+        break;                                                                                                         \
+    }
 #define SYSHANDLER64(name, num)                                                                                        \
     case SYS_##name: {                                                                                                 \
         int64_t ret = SYSHANDLER##num(name);                                                                           \
-        frame->eax = ret >> 32;                                                                                        \
-        frame->edx = ret;                                                                                              \
+        if (frame->vector == 0x20) {                                                                                   \
+            if (unlikely(ret < 0)) {                                                                                   \
+                frame->eax = ret;                                                                                      \
+            } else {                                                                                                   \
+                frame->eax = ret >> 32;                                                                                \
+                frame->edx = ret;                                                                                      \
+            }                                                                                                          \
+        }                                                                                                              \
         break;                                                                                                         \
     }
         SYSHANDLER32(KLOG, 2)
@@ -101,6 +115,28 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(FCNTL, 3)
         SYSHANDLER32(DUP, 2)
         SYSHANDLER32(DUP2, 3)
+        SYSHANDLER32(GETUID, 0)
+        SYSHANDLER32(GETGID, 0)
+        SYSHANDLER32(GETEUID, 0)
+        SYSHANDLER32(GETEGID, 0)
+        SYSHANDLER32(GETPID, 0)
+        SYSHANDLER32(GETPPID, 0)
+        SYSHANDLER32(GETPGID, 1)
+        SYSHANDLER32(STAT, 5)
+        SYSHANDLER32(FSTAT, 2)
+        SYSHANDLER32(PSELECT, 6)
+        SYSHANDLER32(SIGPROCMASK, 3)
+        SYSHANDLER32(SIGACTION, 3)
+        SYSHANDLER32(SIGRETURN, 0)
+        SYSHANDLER32(ACCESS, 5)
+        SYSHANDLER32(FORK, 0)
+        SYSHANDLER32(EXEC, 5)
+        SYSHANDLER32(PWAIT, 3)
+        SYSHANDLER32(KILL, 2)
+        SYSHANDLER32(SETPGID, 2)
+        SYSHANDLER32(CHDIR, 1)
+        SYSHANDLER32(CHROOT, 1)
+        SYSHANDLER32(GETCWD, 2)
     default:
 #if LOG_SYSCALLS
         printk("syscall: unknown syscall %u\n", frame->eax);
@@ -123,4 +159,15 @@ int verify_pointer(uintptr_t ptr, size_t size) {
     if (unlikely(end < ptr)) return EFAULT;
     if (unlikely(end > KERN_VIRT_BASE)) return EFAULT;
     return 0;
+}
+
+void set_syscall_result(int value) {
+    if (current->regs.vector == 0x20) {
+        current->regs.vector = 0;
+        current->regs.eax = value;
+    }
+}
+
+int get_syscall_result() {
+    return current->regs.eax;
 }

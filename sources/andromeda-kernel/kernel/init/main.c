@@ -2,6 +2,7 @@
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
 #include "drv/biosdisk.h"
+#include "drv/console.h"
 #include "drv/device.h"
 #include "drv/loopback.h"
 #include "fs/detect.h"
@@ -45,8 +46,6 @@ static void init_vfs() {
     error = vfs_chroot(root);
     if (unlikely(error)) panic("failed to set working directory (%d)", error);
     file_deref(root);
-
-    vfs_umask(022);
 
     error = vfs_mknod(nullptr, "boot", 4, S_IFDIR | 0755, 0);
     if (unlikely(error)) panic("failed to create /boot (%d)", error);
@@ -125,14 +124,17 @@ static void chroot_to_initrd() {
 
 [[noreturn]] static void run_init() {
     static const andromeda_tagged_string_t init_name = {"/sbin/init", 10};
+    static const andromeda_tagged_string_t environment[] = {
+            {"HOME=/root", 10},
+    };
 
-    printk("kernel: starting /sbin/init\n");
+    printk("kernel: starting init process\n");
 
     file_t *file;
     int error = vfs_open(&file, nullptr, init_name.data, init_name.length, O_RDONLY, 0);
     if (unlikely(error)) panic("failed to open %S (%d)", init_name.data, init_name.length, error);
 
-    error = execute(file, &init_name, 1, nullptr, 0);
+    error = execute(file, &init_name, 1, environment, sizeof(environment) / sizeof(*environment), false);
     file_deref(file);
     if (unlikely(error)) panic("failed to start init process (%d)", error);
 
@@ -149,6 +151,7 @@ static void chroot_to_initrd() {
     bootmem_handover();
     init_proc();
     init_vfs();
+    init_console();
     init_biosdisk(boot_drive, boot_lba);
     mount_boot();
     mount_initrd();

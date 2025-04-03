@@ -14,6 +14,7 @@ idt_entry:
     mov %eax, %fs
     mov %eax, %gs
 
+    cld
     xor %ebp, %ebp
     mov %esp, %eax
     and $~15, %esp

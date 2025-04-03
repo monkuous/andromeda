@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fs/pgcache.h"
+#include "util/list.h"
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -13,8 +14,14 @@ typedef struct dentry dentry_t;
 typedef struct file file_t;
 typedef struct fs fs_t;
 typedef struct inode inode_t;
+typedef struct thread thread_t;
 
 typedef int (*mount_func_t)(fs_t **, void *);
+
+typedef struct {
+    list_node_t node; // for use by the implementations of poll_{submit,cancel}
+    thread_t *thread; // the thread to unblock when poll status changes
+} poll_waiter_t;
 
 typedef struct {
     unsigned char *data;
@@ -48,6 +55,9 @@ typedef struct {
     int (*write)(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos);
     void (*mmap)(file_t *self, uintptr_t head, uintptr_t tail, uint64_t offset, int flags);
     int (*ioctl)(file_t *self, unsigned long request, void *arg);
+    int (*poll)(file_t *self);
+    void (*poll_submit)(file_t *self, poll_waiter_t *waiter);
+    void (*poll_cancel)(file_t *self, poll_waiter_t *waiter);
 } file_ops_t;
 
 struct file {

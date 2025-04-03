@@ -120,7 +120,7 @@ relation_t get_relation(uid_t uid, gid_t gid, bool real);
 pid_t pfork(thread_t *thread);
 
 // Allowed to yield.
-void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void *ctx);
+pid_t pwait(pid_t pid, int options, void (*cont)(pid_t, siginfo_t *, void *), void *ctx);
 
 void remove_thread_from_process(thread_t *thread);
 
@@ -139,3 +139,4 @@ int fd_fcntl(int fd, int cmd, uintptr_t arg);
 
 int fd_allocassoc(int fd, file_t *file, int flags);
 
+int proc_sendsig(pid_t pid, int sig);

@@ -23,11 +23,6 @@ static thread_t *pop_thread() {
     return container(thread_t, node, list_remove_head(&thread_queue));
 }
 
-static void handle_exit(thread_t *thread) {
-    remove_thread_from_process(thread);
-    thread_deref(thread);
-}
-
 static void handle_switch(thread_t *prev) {
     if (prev->tdata != current->tdata) {
         gdt_refresh_tdata();
@@ -42,7 +37,7 @@ static void handle_switch(thread_t *prev) {
             switch_pmap(&current->vm->pmap);
         }
 
-        handle_exit(prev);
+        thread_deref(prev);
     } else if (prev->vm != current->vm) {
         switch_pmap(&current->vm->pmap);
     }
@@ -53,6 +48,8 @@ void sched_yield() {
 
     if (prev->state == THREAD_RUNNING) {
         list_insert_tail(&thread_queue, &prev->node);
+    } else if (prev->state == THREAD_EXITED) {
+        remove_thread_from_process(prev);
     }
 
     thread_t *next = pop_thread();
@@ -85,7 +82,9 @@ void sched_block(thread_cont_t cont, void *ctx, bool interruptible) {
 
 void sched_exit() {
     if (current->process == &init_process && !current->pnode.prev && !current->pnode.next) {
-        panic("tried to kill init");
+        panic("tried to kill init (%s, status: %d)",
+              current->process->wa_info.si_code == CLD_EXITED ? "exited" : "killed",
+              current->process->wa_info.si_status);
     }
 
     current->state = THREAD_EXITED;
@@ -94,18 +93,17 @@ void sched_exit() {
 }
 
 static void do_wake(thread_t *thread, wake_reason_t reason) {
-    ASSERT(thread->state == THREAD_CREATED || thread->state == THREAD_INTERRUPTIBLE ||
-           thread->state == THREAD_UNINTERRUPTIBLE);
-
     if (thread->state == THREAD_CREATED) {
         thread_ref(thread);
     }
 
-    thread->process->nrunning += 1;
-
-    thread->state = THREAD_RUNNING;
     thread->wake_reason = reason;
-    list_insert_tail(&thread_queue, &thread->node);
+
+    if (thread->state != THREAD_RUNNING) {
+        thread->process->nrunning += 1;
+        thread->state = THREAD_RUNNING;
+        list_insert_tail(&thread_queue, &thread->node);
+    }
 }
 
 void sched_interrupt(thread_t *thread) {
@@ -129,13 +127,10 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
     thread->process = current->process;
     list_insert_tail(&current->process->threads, &thread->pnode);
 
-    thread->regs.cs = GDT_SEL_UCODE;
-    thread->regs.ds = GDT_SEL_UDATA;
-    thread->regs.es = GDT_SEL_UDATA;
-    thread->regs.fs = GDT_SEL_UDATA;
-    thread->regs.gs = GDT_SEL_TDATA;
-    thread->regs.ss = GDT_SEL_UDATA;
+    thread->regs = current->regs;
+    thread->tdata = current->tdata;
 
+    thread->signal_mask = current->signal_mask;
     thread->sigstack.ss_flags |= SS_DISABLE;
 
     thread->vm = current->vm;
@@ -152,6 +147,13 @@ void thread_deref(thread_t *thread) {
     if (--thread->references == 0) {
         if (thread->state == THREAD_CREATED) {
             remove_thread_from_process(thread);
+
+            if (--thread->vm->references == 0) {
+                vm_t *vm = vm_join(thread->vm);
+                clean_cur_pmap();
+                vm_join(vm);
+                vm_free(thread->vm);
+            }
         }
 
         cleanup_signals(&thread->signals);

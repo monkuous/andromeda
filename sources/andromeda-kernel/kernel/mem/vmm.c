@@ -326,6 +326,7 @@ static vm_region_t *clone_region(vm_t *dvm, vm_region_t *src) {
     dst->head = src->head;
     dst->tail = src->tail;
     dst->flags = src->flags;
+    dst->prot = src->prot;
     dst->src = src->src;
     dst->offset = src->offset;
 

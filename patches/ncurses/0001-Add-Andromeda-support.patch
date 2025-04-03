@@ -1,0 +1,27 @@
+From 95169a75fe325ca68eada7e85f480c3b0bb15220 Mon Sep 17 00:00:00 2001
+From: monkuous <84319635+monkuous@users.noreply.github.com>
+Date: Wed, 2 Apr 2025 22:44:32 +0200
+Subject: [PATCH] Add Andromeda support
+
+---
+ configure | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/configure b/configure
+index 488d93f..1bb1a4d 100755
+--- a/configure
++++ b/configure
+@@ -6646,6 +6646,10 @@ echo "${ECHO_T}$CC_SHARED_OPTS" >&6
+ 			MK_SHARED_LIB='${CC} ${LDFLAGS} ${CFLAGS} -G -Wl,-brtl -Wl,-blibpath:${RPATH_LIST}:/usr/lib -o $@'
+ 		fi
+ 		;;
++	(andromeda*)
++		CC_SHARED_OPTS='-fPIC'
++		MK_SHARED_LIB='${CC} -shared -o $@'
++		;;
+ 	(beos*)
+ 		MK_SHARED_LIB='${CC} ${LDFLAGS} ${CFLAGS} -o $@ -Xlinker -soname=`basename $@` -nostart -e 0'
+ 		;;
+-- 
+2.49.0
+

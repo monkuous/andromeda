@@ -1,6 +1,9 @@
 #include <stdio.h>
+#include <unistd.h>
 
-int main() {
-    printf("Hello!\n");
+int main(int, char *argv[]) {
+    char *args[] = {"/sbin/bash", nullptr};
+    execve("/sbin/bash", args, environ);
+    fprintf(stderr, "%s: failed to start bash: %m\n", argv[0]);
     return 0;
 }

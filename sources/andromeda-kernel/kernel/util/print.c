@@ -1,5 +1,5 @@
 #include "print.h"
-#include "init/bios.h"
+#include "drv/console.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/panic.h"
@@ -127,24 +127,12 @@ static size_t do_printk(printk_sink_t sink, void *ctx, const char *format, va_li
     return total;
 }
 
-static void bios_print(unsigned char c) {
-    regs_t regs = {.eax = 0xe00 | c};
-    intcall(0x10, &regs);
-}
-
 static void term_sink(const void *buf, size_t size, void *) {
-    const unsigned char *data = buf;
-
-    while (size--) {
-        unsigned char c = *data++;
-
 #if ANDROMEDA_QEMU_DEBUGCON
-        asm("outb %0, $0xe9" ::"a"(c));
+    asm("rep outsb" :: "d" (0xe9), "S" (buf), "c" (size));
 #endif
 
-        if (c == '\n') bios_print('\r');
-        bios_print(c);
-    }
+    console_write(buf, size);
 }
 
 void vprintk(const char *format, va_list args) {

@@ -6,10 +6,12 @@
 #include "mem/layout.h"
 #include "mem/pmem.h"
 #include "mem/vmm.h"
+#include "proc/process.h"
 #include "proc/sched.h"
 #include "proc/signal.h"
 #include "string.h"
 #include "util/panic.h"
+#include "util/print.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
@@ -106,8 +108,16 @@ static void usermem_ret(idt_frame_t *frame, int error) {
 }
 
 static void sendsig(int signo, int error, uintptr_t addr) {
+    printk("vmm(%d): sending signal %d (%d) due to 0x%x (eip: 0x%x, esp: 0x%x)\n",
+           getpid(),
+           signo,
+           error,
+           addr,
+           current->regs.eip,
+           current->regs.esp);
+
     siginfo_t info = {.si_signo = signo, .si_errno = error, .si_addr = (void *)addr};
-    send_signal(current->process, current, &info);
+    send_signal(current->process, current, &info, true);
 }
 
 static bool anon_cow_preserve(uint32_t pte) {
@@ -132,6 +142,7 @@ static uint32_t do_cow(uint32_t pte, uintptr_t addr) {
         pte = (pte & ~PTE_ADDR) | phys | PTE_ANON;
     }
 
+    pte &= ~PTE_COW;
     return pte | PTE_WRITABLE;
 }
 
@@ -371,20 +382,22 @@ void pmap_clone(pmap_t *out, uintptr_t virt, size_t size, bool cow) {
             while (pti <= pti_end) {
                 uint32_t pte = *table;
 
-                if (cow) {
-                    pte |= PTE_COW;
+                if (pte) {
+                    if (cow) {
+                        pte |= PTE_COW;
 
-                    if (pte & PTE_WRITABLE) {
-                        pte &= ~PTE_WRITABLE;
-                        *table = pte;
-                        invlpg((uintptr_t)table << 10);
-                    } else {
-                        *table = pte;
+                        if (pte & PTE_WRITABLE) {
+                            pte &= ~PTE_WRITABLE;
+                            *table = pte;
+                            invlpg((uintptr_t)table << 10);
+                        } else {
+                            *table = pte;
+                        }
                     }
-                }
 
-                if (pte & PTE_ANON) {
-                    phys_to_page(pte)->anon.references += 1;
+                    if (pte & PTE_ANON) {
+                        phys_to_page(pte)->anon.references += 1;
+                    }
                 }
 
                 *otbl++ = pte;

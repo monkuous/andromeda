@@ -11,6 +11,7 @@
 #include "proc/sched.h"
 #include "proc/signal.h"
 #include "string.h"
+#include "sys/syscall.h"
 #include "util/panic.h"
 #include <andromeda/string.h>
 #include <elf.h>
@@ -254,11 +255,26 @@ static int sa_copy(struct stackarea *area, vm_t *srcvm, const void *src, size_t 
     return 0;
 }
 
-static int copy_strings(struct stackctx *ctx, vm_t *srcvm, const andromeda_tagged_string_t *strs, size_t count) {
+static int copy_strings(
+        struct stackctx *ctx,
+        vm_t *srcvm,
+        const andromeda_tagged_string_t *strs,
+        size_t count,
+        bool from_user
+) {
     while (count--) {
         andromeda_tagged_string_t str;
-        int error = user_memcpy(&str, strs++, sizeof(str));
-        if (unlikely(error)) return error;
+        int error;
+
+        if (from_user) {
+            error = vm_copy(&str, srcvm, strs++, sizeof(str));
+            if (unlikely(error)) return error;
+
+            error = verify_pointer((uintptr_t)str.data, str.length);
+            if (unlikely(error)) return error;
+        } else {
+            str = *strs++;
+        }
 
         void *ptr;
         error = sa_copy(&ctx->info, srcvm, str.data, str.length, str.length + 1, &ptr);
@@ -286,14 +302,15 @@ static int write_stack(
         size_t nenvp,
         struct eproc_data *eproc,
         struct elf_data *exec,
-        struct elf_data *interp
+        struct elf_data *interp,
+        bool args_from_user
 ) {
     sa_write(&ctx->base, &nargv, sizeof(nargv), nullptr);
 
-    int error = copy_strings(ctx, old_vm, argv, nargv);
+    int error = copy_strings(ctx, old_vm, argv, nargv, args_from_user);
     if (unlikely(error)) return error;
 
-    error = copy_strings(ctx, old_vm, envp, nenvp);
+    error = copy_strings(ctx, old_vm, envp, nenvp, args_from_user);
     if (unlikely(error)) return error;
 
     if (interp) {
@@ -322,10 +339,11 @@ static int create_stack(
         struct eproc_data *eproc,
         struct elf_data *exec,
         struct elf_data *interp,
-        struct vm_data *out
+        struct vm_data *out,
+        bool args_from_user
 ) {
     struct stackctx ctx = {};
-    int error = write_stack(&ctx, old_vm, argv, nargv, envp, nenvp, eproc, exec, interp);
+    int error = write_stack(&ctx, old_vm, argv, nargv, envp, nenvp, eproc, exec, interp, args_from_user);
     if (unlikely(error)) return error;
 
     size_t base_size = ctx.base.total;
@@ -348,7 +366,7 @@ static int create_stack(
     ctx.info.size = info_size;
     ctx.info.total = 0;
 
-    error = write_stack(&ctx, old_vm, argv, nargv, envp, nenvp, eproc, exec, interp);
+    error = write_stack(&ctx, old_vm, argv, nargv, envp, nenvp, eproc, exec, interp, args_from_user);
     if (unlikely(error)) return error;
 
     ASSERT(ctx.base.total == base_size);
@@ -366,7 +384,8 @@ static int do_create_vm(
         const andromeda_tagged_string_t *envp,
         size_t nenvp,
         struct eproc_data *eproc,
-        struct vm_data *out
+        struct vm_data *out,
+        bool args_from_user
 ) {
     struct elf_data exec_data = {}, interp_buf = {};
     int error = load_elf(file, &exec_data, false);
@@ -401,7 +420,7 @@ static int do_create_vm(
         interp_data = nullptr;
     }
 
-    error = create_stack(old_vm, argv, nargv, envp, nenvp, eproc, &exec_data, interp_data, out);
+    error = create_stack(old_vm, argv, nargv, envp, nenvp, eproc, &exec_data, interp_data, out, args_from_user);
     if (unlikely(error)) return error;
 
     out->entrypoint = interp_data ? interp_data->entrypoint : exec_data.entrypoint;
@@ -415,12 +434,13 @@ static int create_vm(
         const andromeda_tagged_string_t *envp,
         size_t nenvp,
         struct eproc_data *eproc,
-        struct vm_data *out
+        struct vm_data *out,
+        bool args_from_user
 ) {
     vm_t *vm = vm_create();
     vm_t *old = vm_join(vm);
 
-    int error = do_create_vm(file, old, argv, nargv, envp, nenvp, eproc, out);
+    int error = do_create_vm(file, old, argv, nargv, envp, nenvp, eproc, out, args_from_user);
     if (unlikely(error)) {
         clean_cur_pmap();
         vm_join(old);
@@ -484,6 +504,7 @@ static void alter_process(struct eproc_data *data) {
 
 static void setup_regs(idt_frame_t *frame, struct vm_data *vm_data) {
     memset(frame, 0, sizeof(*frame));
+    frame->eflags = 2;
     frame->eip = vm_data->entrypoint;
     frame->esp = vm_data->stack;
     frame->cs = GDT_SEL_UCODE;
@@ -499,7 +520,8 @@ int execute(
         const andromeda_tagged_string_t *argv,
         size_t nargv,
         const andromeda_tagged_string_t *envp,
-        size_t nenvp
+        size_t nenvp,
+        bool args_from_user
 ) {
     if (unlikely(!S_ISREG(file->inode->mode))) return EACCES;
 
@@ -513,7 +535,7 @@ int execute(
     build_eproc_data(file, &eproc_data);
 
     struct vm_data vm_data;
-    error = create_vm(file, argv, nargv, envp, nenvp, &eproc_data, &vm_data);
+    error = create_vm(file, argv, nargv, envp, nenvp, &eproc_data, &vm_data, args_from_user);
     if (unlikely(error)) return error;
 
     alter_process(&eproc_data);

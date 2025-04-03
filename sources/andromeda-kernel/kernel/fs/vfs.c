@@ -13,6 +13,7 @@
 #include "util/panic.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -289,10 +290,15 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
     return 0;
 }
 
+static int regular_poll(file_t *) {
+    return POLLIN | POLLRDNORM | POLLRDBAND | POLLPRI | POLLOUT | POLLWRNORM | POLLWRBAND;
+}
+
 static const file_ops_t regular_file_ops = {
         .seek = regular_seek,
         .read = regular_read,
         .write = regular_write,
+        .poll = regular_poll,
 };
 
 int access_file(file_t *file, int amode) {
@@ -530,7 +536,7 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
             }
 
             was_dot = true;
-        } else if (length != 1 && path[0] != '.') {
+        } else if (length != 1 || path[0] != '.') {
             dentry_t *child;
             int error = simple_lookup(rel, path, complen, &child);
             dentry_deref(rel);

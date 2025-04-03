@@ -3,13 +3,16 @@ packages:
     implict_package: true
     architecture: noarch
     source:
-      subdir: ports
+      subdir: sources
       version: '0.0.0'
     build:
       - args:
           - 'mkdir'
           - '-p'
+          - '@THIS_COLLECT_DIR@/boot'
           - '@THIS_COLLECT_DIR@/dev'
+          - '@THIS_COLLECT_DIR@/etc/skel'
+          - '@THIS_COLLECT_DIR@/root'
           - '@THIS_COLLECT_DIR@/usr/bin'
           - '@THIS_COLLECT_DIR@/usr/lib'
       - args:
@@ -24,3 +27,19 @@ packages:
           - 'usr/lib'
           - 'usr/sbin'
           - '@THIS_COLLECT_DIR@'
+      - args:
+          - 'cp'
+          - '@THIS_SOURCE_DIR@/group'
+          - '@THIS_SOURCE_DIR@/passwd'
+          - '@THIS_SOURCE_DIR@/profile'
+          - '@THIS_COLLECT_DIR@/etc'
+      - args:
+          - 'cp'
+          - '@THIS_SOURCE_DIR@/.bash_profile'
+          - '@THIS_SOURCE_DIR@/.bashrc'
+          - '@THIS_COLLECT_DIR@/etc/skel'
+      - args:
+          - 'cp'
+          - '@THIS_SOURCE_DIR@/.bash_profile'
+          - '@THIS_SOURCE_DIR@/.bashrc'
+          - '@THIS_COLLECT_DIR@/root'

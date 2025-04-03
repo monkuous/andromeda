@@ -28,6 +28,7 @@ static pid_t last_pid;
 
 static procent_t *pidresolve(pid_t pid) {
     if (!proc_capacity) return nullptr;
+    if (pid < 0) return nullptr;
 
     uint32_t hash = make_hash_int32(pid);
     size_t bucket = hash & (proc_capacity - 1);
@@ -108,6 +109,7 @@ void init_proc() {
     init_procent.has_session = true;
 
     init_procent.process.group = &init_procent.group;
+    init_procent.process.nrunning = 1;
     list_insert_tail(&init_procent.process.threads, &current->pnode);
 
     init_procent.group.session = &init_procent.session;
@@ -196,7 +198,7 @@ int setpgid(pid_t pid, pid_t pgid) {
     prgroup_t *old_group = process->group;
     procent_t *group_ent = proc_ent;
 
-    if (pgid != 0) {
+    if (pgid != 0 && pgid != proc_ent->id) {
         group_ent = pidresolve(pgid);
         if (unlikely(!group_ent) || unlikely(!group_ent->has_group)) return EPERM;
         if (group_ent->group.session != process->group->session) return EPERM;
@@ -297,7 +299,7 @@ pid_t pfork(thread_t *thread) {
     list_remove(&curp->threads, &thread->pnode);
     list_insert_tail(&ent->process.threads, &thread->pnode);
 
-    pid_register(&init_procent);
+    pid_register(ent);
 
     return ent->id;
 }
@@ -307,13 +309,17 @@ struct waitctx {
     thread_t *thread;
     pid_t pid;
     int options;
-    void (*cont)(int, siginfo_t *, void *);
+    void (*cont)(pid_t, siginfo_t *, void *);
     void *ctx;
     siginfo_t info;
 };
 
+static bool is_terminate(int code) {
+    return code == CLD_EXITED || code == CLD_KILLED || code == CLD_DUMPED;
+}
+
 static bool wait_type_matches(int options, process_t *proc) {
-    if ((options & WEXITED) && proc->wa_info.si_code == CLD_EXITED) return true;
+    if ((options & WEXITED) && is_terminate(proc->wa_info.si_code)) return true;
     if ((options & WSTOPPED) && proc->wa_info.si_code == CLD_STOPPED) return true;
     if ((options & WCONTINUED) && proc->wa_info.si_code == CLD_CONTINUED) return true;
 
@@ -344,6 +350,9 @@ static void clean_zombie(process_t *proc) {
             sched_unblock(cur->thread);
             cur = next;
         }
+
+        proc->parent->waiting.first = nullptr;
+        proc->parent->waiting.last = nullptr;
     }
 
     procent_t *ent = pent(proc);
@@ -356,13 +365,13 @@ static void pwait_cont(void *ptr) {
 
     if (current->wake_reason == WAKE_UNBLOCK) {
         if (ctx->info.si_signo) {
-            ctx->cont(0, &ctx->info, ctx);
+            ctx->cont(ctx->pid, &ctx->info, ctx->ctx);
             // consumption is handled by trigger_wait
         } else {
-            ctx->cont(ECHILD, nullptr, ctx->ctx);
+            ctx->cont(-ECHILD, nullptr, ctx->ctx);
         }
     } else {
-        ctx->cont(EINTR, nullptr, ctx->ctx);
+        ctx->cont(-EINTR, nullptr, ctx->ctx);
     }
 
     vmfree(ctx, sizeof(*ctx));
@@ -374,42 +383,29 @@ static void consume_wait(process_t *parent, process_t *child) {
     list_remove(&parent->wait_avail, &child->wa_node);
 }
 
-void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void *ctx) {
-    if (options & ~(WCONTINUED | WEXITED | WNOHANG | WNOWAIT | WSTOPPED)) {
-        cont(EINVAL, nullptr, ctx);
-        return;
-    }
-
-    if (!(options & (WEXITED | WSTOPPED | WCONTINUED))) {
-        cont(EINVAL, nullptr, ctx);
-        return;
-    }
+pid_t pwait(pid_t pid, int options, void (*cont)(pid_t, siginfo_t *, void *), void *ctx) {
+    if (options & ~(WCONTINUED | WEXITED | WNOHANG | WNOWAIT | WSTOPPED)) return -EINVAL;
+    if (!(options & (WEXITED | WSTOPPED | WCONTINUED))) return -EINVAL;
 
     process_t *cproc = current->process;
 
-    if (list_is_empty(&cproc->children)) {
-        cont(ECHILD, nullptr, ctx);
-        return;
-    }
+    if (list_is_empty(&cproc->children)) return ECHILD;
 
     list_foreach(cproc->wait_avail, process_t, wa_node, child) {
         if (wait_matches(pid, options, cproc, child)) {
-            cont(0, &child->wa_info, ctx);
+            pid_t pid = pent(child)->id;
+            cont(pid, &child->wa_info, ctx);
 
             if (!(options & WNOWAIT)) {
                 consume_wait(cproc, child);
                 if (list_is_empty(&child->threads)) clean_zombie(child);
             }
 
-            return;
+            return pid;
         }
     }
 
-    if (options & WNOHANG) {
-        siginfo_t info = {};
-        cont(0, &info, ctx);
-        return;
-    }
+    if (options & WNOHANG) return 0;
 
     struct waitctx *wait = vmalloc(sizeof(*wait));
     memset(wait, 0, sizeof(*wait));
@@ -421,6 +417,7 @@ void pwait(pid_t pid, int options, void (*cont)(int, siginfo_t *, void *), void 
 
     list_insert_tail(&cproc->waiting, &wait->node);
     sched_block(pwait_cont, wait, true);
+    return -EAGAIN;
 }
 
 static bool trigger_wait(process_t *proc) {
@@ -443,6 +440,7 @@ static bool trigger_wait(process_t *proc) {
             bool consume = !(cur->options & WNOWAIT);
 
             if (!consume || !consumed) {
+                cur->pid = pent(proc)->id;
                 cur->info = proc->wa_info;
                 sched_unblock(cur->thread);
 
@@ -494,9 +492,9 @@ static void make_zombie(process_t *proc) {
 
     vmfree(proc->fds, sizeof(*proc->fds) * proc->fds_cap);
 
-    send_signal(proc->parent, nullptr, &proc->wa_info);
+    send_signal(proc->parent, nullptr, &proc->wa_info, false);
 
-    if (!(proc->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDWAIT) || trigger_wait(proc)) {
+    if ((proc->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDWAIT) || trigger_wait(proc)) {
         clean_zombie(proc);
     }
 }
@@ -702,7 +700,7 @@ void proc_stop(pending_signal_t *trigger) {
                 .si_uid = trigger->src,
                 .si_status = trigger->info.si_signo,
         };
-        send_signal(current->process->parent, nullptr, &current->process->wa_info);
+        send_signal(current->process->parent, nullptr, &current->process->wa_info, false);
         trigger_wait(current->process);
     }
 
@@ -725,7 +723,7 @@ void proc_continue(process_t *proc, pending_signal_t *trigger) {
                 .si_uid = trigger->src,
                 .si_status = trigger->info.si_signo,
         };
-        send_signal(current->process->parent, nullptr, &current->process->wa_info);
+        send_signal(current->process->parent, nullptr, &current->process->wa_info, false);
         trigger_wait(current->process);
     }
 
@@ -884,5 +882,94 @@ int fd_allocassoc(int fd, file_t *file, int flags) {
     file_ref(file);
 
     if (proc->fds_start == (unsigned)fd) proc->fds_start++;
+    return 0;
+}
+
+static bool can_send_signal(process_t *proc, int sig) {
+    if (!current->process->euid) return true;
+    if (sig == SIGCONT && proc->group->session == current->process->group->session) return true;
+
+    if (current->process->euid == proc->ruid) return true;
+    if (current->process->euid == proc->suid) return true;
+    if (current->process->ruid == proc->ruid) return true;
+    if (current->process->ruid == proc->suid) return true;
+
+    return false;
+}
+
+static bool try_sendsig(process_t *proc, int sig) {
+    if (!can_send_signal(proc, sig)) return false;
+
+    if (sig && !list_is_empty(&proc->threads)) {
+        siginfo_t info = {
+                .si_signo = sig,
+                .si_code = SI_USER,
+                .si_pid = getpid(),
+                .si_uid = current->process->ruid,
+        };
+        send_signal(proc, nullptr, &info, false);
+    }
+
+    return true;
+}
+
+static int try_sendsig_group(prgroup_t *group, int sig) {
+    size_t attempts = 0;
+    bool one_sent = false;
+
+    list_foreach(group->members, process_t, gnode, cur) {
+        attempts += 1;
+
+        if (try_sendsig(cur, sig)) {
+            one_sent = true;
+        }
+    }
+
+    if (!attempts) return ESRCH;
+    if (!one_sent) return EPERM;
+    return 0;
+}
+
+int proc_sendsig(pid_t pid, int sig) {
+    if (unlikely(sig < 0 || sig >= NSIG)) return EINVAL;
+
+    if (pid > 0) {
+        procent_t *pent = pidresolve(pid);
+        if (unlikely(!pent) || unlikely(!pent->has_process)) return ESRCH;
+
+        if (unlikely(!try_sendsig(&pent->process, sig))) return EPERM;
+    } else if (pid == 0) {
+        int error = try_sendsig_group(current->process->group, sig);
+        if (unlikely(error)) return error;
+    } else if (pid < -1) {
+        procent_t *pent = pidresolve(-pid);
+        if (unlikely(!pent) || unlikely(!pent->has_group)) return ESRCH;
+
+        if (unlikely(!try_sendsig_group(&pent->group, sig))) return EPERM;
+    } else {
+        // pid == -1
+        size_t attempts = 0;
+        bool one_sent = false;
+
+        for (size_t i = 0; i < proc_capacity; i++) {
+            procent_t *cur = procs[i];
+
+            while (cur) {
+                if (cur != &init_procent && cur->has_process) {
+                    attempts += 1;
+
+                    if (try_sendsig(&cur->process, sig)) {
+                        one_sent = true;
+                    }
+                }
+
+                cur = cur->next;
+            }
+        }
+
+        if (!attempts) return ESRCH;
+        if (!one_sent) return EPERM;
+    }
+
     return 0;
 }

@@ -1,19 +1,23 @@
-From 65849300170e4c09b9bbbba594e78da4d4e7dbd0 Mon Sep 17 00:00:00 2001
+From 64d1ef5adb987c8b97383b2d8b1982d479aa728c Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
 
 ---
- meson.build                                   |  16 +-
+ meson.build                                   |  18 +-
  options/ansi/include/bits/ansi/time_t.h       |   4 +-
+ options/elf/include/elf.h                     |   1 +
  options/internal/include/bits/off_t.h         |   6 +-
+ options/internal/x86/setjmp.S                 |   4 +-
+ options/rtld/generic/linker.cpp               |  11 +
+ options/rtld/x86/elf.hpp                      |   1 +
  sysdeps/andromeda/crt/Scrt0.S                 |  27 +
- sysdeps/andromeda/crt/crt0.S                  |  23 +
+ sysdeps/andromeda/crt/crt0.S                  |  24 +
  sysdeps/andromeda/crt/crti.S                  |  20 +
  sysdeps/andromeda/crt/crtn.S                  |  12 +
  sysdeps/andromeda/crt/meson.build             |  13 +
  sysdeps/andromeda/generic/entry.cpp           |  17 +
- sysdeps/andromeda/generic/generic.cpp         | 203 +++++++
+ sysdeps/andromeda/generic/generic.cpp         | 477 ++++++++++++++++
  sysdeps/andromeda/generic/meson.build         |   2 +
  sysdeps/andromeda/include/abi-bits/access.h   |   1 +
  sysdeps/andromeda/include/abi-bits/auxv.h     |   1 +
@@ -65,11 +69,13 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/abi-bits/vt.h       |   1 +
  sysdeps/andromeda/include/abi-bits/wait.h     |   1 +
  sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
+ sysdeps/andromeda/include/andromeda/ioctl.h   |   6 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
- sysdeps/andromeda/include/andromeda/syscall.h |  22 +
- sysdeps/andromeda/include/meson.build         |  58 ++
+ sysdeps/andromeda/include/andromeda/syscall.h |  44 ++
+ sysdeps/andromeda/include/meson.build         |  60 ++
+ sysdeps/andromeda/include/sys/sysmacros.h     |  33 ++
  sysdeps/andromeda/meson.build                 |  13 +
- 65 files changed, 1035 insertions(+), 9 deletions(-)
+ 71 files changed, 1391 insertions(+), 10 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -128,13 +134,15 @@ Subject: [PATCH] Add Andromeda port
  create mode 120000 sysdeps/andromeda/include/abi-bits/vt.h
  create mode 120000 sysdeps/andromeda/include/abi-bits/wait.h
  create mode 120000 sysdeps/andromeda/include/abi-bits/xattr.h
+ create mode 100644 sysdeps/andromeda/include/andromeda/ioctl.h
  create mode 100644 sysdeps/andromeda/include/andromeda/string.h
  create mode 100644 sysdeps/andromeda/include/andromeda/syscall.h
  create mode 100644 sysdeps/andromeda/include/meson.build
+ create mode 100644 sysdeps/andromeda/include/sys/sysmacros.h
  create mode 100644 sysdeps/andromeda/meson.build
 
 diff --git a/meson.build b/meson.build
-index eae40c4f..33fc9a30 100644
+index eae40c4f..4ca20afb 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -17,6 +17,8 @@ libc_include_dirs = [
@@ -171,16 +179,18 @@ index eae40c4f..33fc9a30 100644
  	endif
  endif
  
-@@ -258,6 +257,8 @@ elif host_machine.system() == 'astral'
+@@ -258,6 +257,10 @@ elif host_machine.system() == 'astral'
  	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
  	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
  	subdir('sysdeps/astral')
 +elif host_machine.system() == 'andromeda'
++	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
++	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 +	subdir('sysdeps/andromeda')
  else
  	error('No sysdeps defined for OS: ' + host_machine.system())
  endif
-@@ -321,6 +322,9 @@ libc_include_dirs += include_directories('.')
+@@ -321,6 +324,9 @@ libc_include_dirs += include_directories('.')
  
  #----------------------------------------------------------------------------------------
  
@@ -205,6 +215,18 @@ index 1c29fa0f..88600a8e 100644
  
  #endif
  
+diff --git a/options/elf/include/elf.h b/options/elf/include/elf.h
+index 24ff1377..78eb461d 100644
+--- a/options/elf/include/elf.h
++++ b/options/elf/include/elf.h
+@@ -269,6 +269,7 @@ enum {
+ 	R_386_TLS_TPOFF = 14,
+ 	R_386_TLS_DTPMOD32 = 35,
+ 	R_386_TLS_DTPOFF32 = 36,
++	R_386_TLS_TPOFF32 = 37,
+ 	R_386_TLS_DESC = 41,
+ 	R_386_IRELATIVE = 42
+ };
 diff --git a/options/internal/include/bits/off_t.h b/options/internal/include/bits/off_t.h
 index 43dcd9ed..277c5b78 100644
 --- a/options/internal/include/bits/off_t.h
@@ -222,6 +244,61 @@ index 43dcd9ed..277c5b78 100644
 +typedef __mlibc_int64 off64_t;
  
  #endif /* MLIBC_OFF_T_H */
+diff --git a/options/internal/x86/setjmp.S b/options/internal/x86/setjmp.S
+index d2cd348b..e9f726da 100644
+--- a/options/internal/x86/setjmp.S
++++ b/options/internal/x86/setjmp.S
+@@ -17,7 +17,9 @@ __setjmp:
+ 	xor %eax, %eax
+ 	ret
+ 
+-1:
++1:	call 1f
++1:	pop %ebx
++	add $(_GLOBAL_OFFSET_TABLE_ - 1b), %ebx
+ 	jmp __sigsetjmp@PLT
+ 
+ .global setjmp
+diff --git a/options/rtld/generic/linker.cpp b/options/rtld/generic/linker.cpp
+index 848f7ded..cd64e9fd 100644
+--- a/options/rtld/generic/linker.cpp
++++ b/options/rtld/generic/linker.cpp
+@@ -1928,6 +1928,9 @@ void Loader::_processRelocations(Relocation &rel) {
+ 		__ensure(p);
+ 		rel.relocate(p->symbol()->st_value + rel.addend_rel() - TLS_DTV_OFFSET);
+ 	} break;
++#ifdef R_TLS_TPRELPOS
++	case R_TLS_TPRELPOS:
++#endif
+ 	case R_TLS_TPREL: {
+ 		uintptr_t off = rel.addend_rel();
+ 		ssize_t tls_offset = 0;
+@@ -1952,6 +1955,14 @@ void Loader::_processRelocations(Relocation &rel) {
+ 			tls_offset = rel.object()->tlsOffset;
+ 		}
+ 
++#ifdef R_TLS_TPRELPOS
++		if (rel.type() == R_TLS_TPRELPOS) {
++			off = (tls_offset + tlsOffsetFromTp) - off;
++			rel.relocate(off);
++			break;
++		}
++#endif
++
+ 		off += tls_offset + tlsOffsetFromTp;
+ 		rel.relocate(off);
+ 	} break;
+diff --git a/options/rtld/x86/elf.hpp b/options/rtld/x86/elf.hpp
+index 0dc12ac8..7ec0e84f 100644
+--- a/options/rtld/x86/elf.hpp
++++ b/options/rtld/x86/elf.hpp
+@@ -39,5 +39,6 @@ using elf_vernaux = Elf32_Vernaux;
+ #define R_TLS_DTPREL R_386_TLS_DTPOFF32
+ #define R_TLS_TPREL R_386_TLS_TPOFF
+ #define R_TLSDESC R_386_TLS_DESC
++#define R_TLS_TPRELPOS R_386_TLS_TPOFF32
+ 
+ #define TP_TCB_OFFSET 0
 diff --git a/sysdeps/andromeda/crt/Scrt0.S b/sysdeps/andromeda/crt/Scrt0.S
 new file mode 100644
 index 00000000..a979b033
@@ -257,10 +334,10 @@ index 00000000..a979b033
 +.section .note.GNU-stack,"",@progbits
 diff --git a/sysdeps/andromeda/crt/crt0.S b/sysdeps/andromeda/crt/crt0.S
 new file mode 100644
-index 00000000..be0d4346
+index 00000000..9565ff03
 --- /dev/null
 +++ b/sysdeps/andromeda/crt/crt0.S
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,24 @@
 +.text
 +
 +.balign 16
@@ -273,6 +350,7 @@ index 00000000..be0d4346
 +
 +	xor %ebp, %ebp
 +	mov %esp, %eax
++	mov $_GLOBAL_OFFSET_TABLE_, %ebx
 +
 +	sub $8, %esp
 +	pushl %eax
@@ -372,13 +450,17 @@ index 00000000..6e28747f
 +}
 diff --git a/sysdeps/andromeda/generic/generic.cpp b/sysdeps/andromeda/generic/generic.cpp
 new file mode 100644
-index 00000000..8a62ec6f
+index 00000000..6aab1cae
 --- /dev/null
 +++ b/sysdeps/andromeda/generic/generic.cpp
-@@ -0,0 +1,203 @@
-+#include "andromeda/syscall.h"
+@@ -0,0 +1,477 @@
++#include <andromeda/ioctl.h>
++#include <andromeda/string.h>
++#include <andromeda/syscall.h>
 +#include <errno.h>
++#include <frg/vector.hpp>
 +#include <mlibc/all-sysdeps.hpp>
++#include <mlibc/allocator.hpp>
 +#include <stdlib.h>
 +#include <string.h>
 +
@@ -437,6 +519,16 @@ index 00000000..8a62ec6f
 +		asm volatile("int $0x20"                                                                   \
 +		             : "=a"(r.r1), "=d"(r.r2)                                                      \
 +		             : "a"(num), "b"(a0), "c"(a1), "d"(a2), "S"(a3), "D"(a4)                       \
++		             : "memory");                                                                  \
++		r;                                                                                         \
++	})
++
++#define SYSCALL6(num, a0, a1, a2, a3, a4, a5)                                                      \
++	({                                                                                             \
++		syscall_result_t r;                                                                        \
++		asm volatile("push %%ebp; mov %[ebp], %%ebp; int $0x20; pop %%ebp"                         \
++		             : "=a"(r.r1), "=d"(r.r2)                                                      \
++		             : "a"(num), "b"(a0), "c"(a1), "d"(a2), "S"(a3), "D"(a4), [ebp] "g"(a5)        \
 +		             : "memory");                                                                  \
 +		r;                                                                                         \
 +	})
@@ -576,6 +668,266 @@ index 00000000..8a62ec6f
 +
 +int sys_dup2(int fd, int flags, int new_fd) {
 +	SYSCALL(3, SYS_DUP2, fd, flags, new_fd);
++	return 0;
++}
++
++uid_t sys_getuid() { return SYSCALL0(SYS_GETUID).r1; }
++
++gid_t sys_getgid() { return SYSCALL0(SYS_GETGID).r1; }
++
++uid_t sys_geteuid() { return SYSCALL0(SYS_GETEUID).r1; }
++
++gid_t sys_getegid() { return SYSCALL0(SYS_GETEGID).r1; }
++
++pid_t sys_getpid() { return SYSCALL0(SYS_GETPID).r1; }
++
++pid_t sys_getppid() { return SYSCALL0(SYS_GETPPID).r1; }
++
++int sys_getpgid(pid_t pid, pid_t *pgid) {
++	*pgid = SYSCALL(1, SYS_GETPGID, pid).r1;
++	return 0;
++}
++
++static int do_fstat(int fd, const char *path, int flags, struct stat *statbuf) {
++	SYSCALL(5, SYS_STAT, fd, path, strlen(path), flags, statbuf);
++	return 0;
++}
++
++int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
++	switch (fsfdt) {
++		case fsfd_target::path:
++			return do_fstat(AT_FDCWD, path, flags, statbuf);
++		case fsfd_target::fd:
++			SYSCALL(2, SYS_FSTAT, fd, statbuf);
++			return 0;
++		case fsfd_target::fd_path:
++			return do_fstat(fd, path, flags, statbuf);
++		default:
++			return EINVAL;
++	}
++}
++
++int sys_pselect(
++    int nfds,
++    fd_set *readfds,
++    fd_set *writefds,
++    fd_set *errorfds,
++    const struct timespec *timeout,
++    const sigset_t *sigmask,
++    int *num_events
++) {
++	*num_events = SYSCALL(6, SYS_PSELECT, nfds, readfds, writefds, errorfds, timeout, sigmask).r1;
++	return 0;
++}
++
++int sys_sigprocmask(int how, const sigset_t *set, sigset_t *retrieve) {
++	SYSCALL(3, SYS_SIGPROCMASK, how, set, retrieve);
++	return 0;
++}
++
++[[gnu::naked]] static void default_sa_restorer(void) {
++	asm("mov %0, %%eax \n\t"
++	    "int $0x20" ::"i"(SYS_SIGRETURN));
++}
++
++int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
++	struct sigaction sa;
++
++	if (act && !(act->sa_flags & SA_RESTORER)) {
++		sa = *act;
++		sa.sa_restorer = default_sa_restorer;
++		act = &sa;
++	}
++
++	SYSCALL(3, SYS_SIGACTION, sig, act, oact);
++	return 0;
++}
++
++int sys_access(const char *path, int mode) { return sys_faccessat(AT_FDCWD, path, mode, 0); }
++
++int sys_faccessat(int dirfd, const char *pathname, int mode, int flags) {
++	SYSCALL(5, SYS_ACCESS, dirfd, pathname, strlen(pathname), mode, flags);
++	return 0;
++}
++
++int sys_fork(pid_t *child) {
++	*child = SYSCALL(0, SYS_FORK).r1;
++	return 0;
++}
++
++struct FileDescriptor {
++	int fd;
++
++	FileDescriptor(int fd) : fd(fd) {}
++
++	~FileDescriptor() { sys_close(fd); }
++};
++
++int sys_execve(const char *path, char *const *argv, char *const *envp) {
++	int fd;
++	int error = sys_open(path, O_RDONLY | O_CLOEXEC, 0, &fd);
++	if (__builtin_expect(!!error, 0))
++		return error;
++	FileDescriptor _(fd);
++
++	size_t nargv = 0;
++	while (argv[nargv]) {
++		nargv++;
++	}
++
++	size_t nenvp = 0;
++	while (envp[nenvp]) {
++		nenvp++;
++	}
++
++	frg::vector<andromeda_tagged_string_t, MemoryAllocator> arg{getAllocator()};
++	frg::vector<andromeda_tagged_string_t, MemoryAllocator> env{getAllocator()};
++	arg.resize(nargv);
++	env.resize(nenvp);
++
++	for (size_t i = 0; i < nargv; i++) {
++		arg[i].data = argv[i];
++		arg[i].length = strlen(argv[i]);
++	}
++
++	for (size_t i = 0; i < nenvp; i++) {
++		env[i].data = envp[i];
++		env[i].length = strlen(envp[i]);
++	}
++
++	SYSCALL(5, SYS_EXEC, fd, arg.data(), nargv, env.data(), nenvp);
++	return 0;
++}
++
++int sys_waitpid(pid_t pid, int *status, int flags, struct rusage *, pid_t *ret_pid) {
++	if (flags & ~(WCONTINUED | WNOHANG | WUNTRACED))
++		return EINVAL;
++
++	flags |= WEXITED;
++
++	if (flags & WUNTRACED) {
++		flags &= ~WUNTRACED;
++		flags |= WSTOPPED;
++	}
++
++	siginfo_t info;
++	*ret_pid = SYSCALL(3, SYS_PWAIT, pid, flags, &info).r1;
++
++	switch (info.si_code) {
++		case CLD_EXITED:
++			*status = W_EXITCODE(info.si_status & 0xff, 0);
++			break;
++		case CLD_KILLED:
++			*status = info.si_status & 0x7f;
++			break;
++		case CLD_DUMPED:
++			*status = (info.si_status & 0x7f) | 0x80;
++			break;
++		case CLD_STOPPED:
++			*status = W_EXITCODE(info.si_status & 0x7f, 0x7f);
++			break;
++		case CLD_CONTINUED:
++			*status = 0xffff;
++			break;
++		default:
++			return EINVAL;
++	}
++
++	return 0;
++}
++
++int sys_waitid(idtype_t idtype, id_t id, siginfo_t *info, int options) {
++	pid_t pid;
++
++	switch (idtype) {
++		case P_PID:
++			if (id < 1 || id > INT_MAX) {
++				return EINVAL;
++			}
++
++			pid = (pid_t)id;
++			break;
++		case P_PGID:
++			if (id < 2 || id > INT_MAX) {
++				return EINVAL;
++			}
++
++			pid = -(pid_t)id;
++			break;
++		case P_ALL:
++			pid = -1;
++			break;
++		default:
++			return EINVAL;
++	}
++
++	SYSCALL(3, SYS_PWAIT, pid, options, info);
++	return 0;
++}
++
++int sys_kill(int pid, int sig) {
++	SYSCALL(2, SYS_KILL, pid, sig);
++	return 0;
++}
++
++int sys_tcgetattr(int fd, struct termios *attr) {
++	SYSCALL(3, SYS_IOCTL, fd, TCGETS, attr);
++	return 0;
++}
++
++int sys_tcsetattr(int fd, int optional_actions, const struct termios *attr) {
++	int ioctl;
++
++	switch (optional_actions) {
++		case TCSANOW:
++			ioctl = TCSETS;
++			break;
++		case TCSADRAIN:
++			ioctl = TCSETSW;
++			break;
++		case TCSAFLUSH:
++			ioctl = TCSETSF;
++			break;
++		default:
++			return EINVAL;
++	}
++
++	SYSCALL(3, SYS_IOCTL, fd, ioctl, attr);
++	return 0;
++}
++
++int sys_setpgid(pid_t pid, pid_t pgid) {
++	SYSCALL(2, SYS_SETPGID, pid, pgid);
++	return 0;
++}
++
++static int chdir_like(int syscall, const char *path) {
++	int fd;
++	int error = sys_open(path, O_PATH | O_CLOEXEC, 0, &fd);
++	if (__builtin_expect(!!error, 0)) {
++		return error;
++	}
++	FileDescriptor _(fd);
++
++	SYSCALL(1, syscall, fd);
++	return 0;
++}
++
++int sys_chdir(const char *path) { return chdir_like(SYS_CHDIR, path); }
++
++int sys_chroot(const char *path) { return chdir_like(SYS_CHROOT, path); }
++
++int sys_getcwd(char *buffer, size_t size) {
++	if (size == 0) {
++		return ERANGE;
++	}
++
++	size_t len = SYSCALL(2, SYS_GETCWD, buffer, size - 1).r1;
++	if (len >= size) {
++		return ERANGE;
++	}
++
++	buffer[len] = 0;
 +	return 0;
 +}
 +}; // namespace mlibc
@@ -1532,6 +1884,18 @@ index 00000000..66412d70
 @@ -0,0 +1 @@
 +../../../../abis/linux/xattr.h
 \ No newline at end of file
+diff --git a/sysdeps/andromeda/include/andromeda/ioctl.h b/sysdeps/andromeda/include/andromeda/ioctl.h
+new file mode 100644
+index 00000000..603a6e10
+--- /dev/null
++++ b/sysdeps/andromeda/include/andromeda/ioctl.h
+@@ -0,0 +1,6 @@
++#pragma once
++
++#define TCGETS 0x5401
++#define TCSETS 0x5402
++#define TCSETSW 0x5403
++#define TCSETSF 0x5404
 diff --git a/sysdeps/andromeda/include/andromeda/string.h b/sysdeps/andromeda/include/andromeda/string.h
 new file mode 100644
 index 00000000..58bac89d
@@ -1551,10 +1915,10 @@ index 00000000..58bac89d
 +#endif /* _ANDROMEDA_STRING_H */
 diff --git a/sysdeps/andromeda/include/andromeda/syscall.h b/sysdeps/andromeda/include/andromeda/syscall.h
 new file mode 100644
-index 00000000..f0941cb4
+index 00000000..21088d67
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/syscall.h
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,44 @@
 +#ifndef _ANDROMEDA_SYSCALL_H
 +#define _ANDROMEDA_SYSCALL_H
 +
@@ -1575,14 +1939,36 @@ index 00000000..f0941cb4
 +#define SYS_FCNTL 14
 +#define SYS_DUP 15
 +#define SYS_DUP2 16
++#define SYS_GETUID 17
++#define SYS_GETGID 18
++#define SYS_GETEUID 19
++#define SYS_GETEGID 20
++#define SYS_GETPID 21
++#define SYS_GETPPID 22
++#define SYS_GETPGID 23
++#define SYS_STAT 24
++#define SYS_FSTAT 25
++#define SYS_PSELECT 26
++#define SYS_SIGPROCMASK 27
++#define SYS_SIGACTION 28
++#define SYS_SIGRETURN 29
++#define SYS_ACCESS 30
++#define SYS_FORK 31
++#define SYS_EXEC 32
++#define SYS_PWAIT 33
++#define SYS_KILL 34
++#define SYS_SETPGID 35
++#define SYS_CHDIR 36
++#define SYS_CHROOT 37
++#define SYS_GETCWD 38
 +
 +#endif /* _ANDROMEDA_SYSCALL_H */
 diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build
 new file mode 100644
-index 00000000..76b8e64e
+index 00000000..8589b5c4
 --- /dev/null
 +++ b/sysdeps/andromeda/include/meson.build
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,60 @@
 +if not no_headers
 +    install_headers(
 +        'abi-bits/access.h',
@@ -1635,12 +2021,53 @@ index 00000000..76b8e64e
 +        'abi-bits/vt.h',
 +        'abi-bits/wait.h',
 +        'abi-bits/xattr.h',
++        'andromeda/ioctl.h',
 +        'andromeda/string.h',
 +        'andromeda/syscall.h',
++        'sys/sysmacros.h',
 +        follow_symlinks: true,
 +        preserve_path: true,
 +    )
 +endif
+diff --git a/sysdeps/andromeda/include/sys/sysmacros.h b/sysdeps/andromeda/include/sys/sysmacros.h
+new file mode 100644
+index 00000000..7eacbe5e
+--- /dev/null
++++ b/sysdeps/andromeda/include/sys/sysmacros.h
+@@ -0,0 +1,33 @@
++#ifndef _SYS_SYSMACROS_H
++#define _SYS_SYSMACROS_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <bits/inline-definition.h>
++
++__MLIBC_INLINE_DEFINITION unsigned int __mlibc_dev_major(
++    unsigned long long int __dev) {
++return __dev >> 32;
++}
++
++__MLIBC_INLINE_DEFINITION unsigned int __mlibc_dev_minor(
++    unsigned long long int __dev) {
++return __dev;
++}
++
++__MLIBC_INLINE_DEFINITION unsigned long long int __mlibc_dev_makedev(
++    unsigned int __major, unsigned int __minor) {
++return ((unsigned long long int)__major << 32) | __minor;
++}
++
++#define major(dev) __mlibc_dev_major(dev)
++#define minor(dev) __mlibc_dev_minor(dev)
++#define makedev(major, minor) __mlibc_dev_makedev(major, minor)
++
++#ifdef __cplusplus
++};
++#endif
++
++#endif /* _SYS_SYSMACROS_H */
 diff --git a/sysdeps/andromeda/meson.build b/sysdeps/andromeda/meson.build
 new file mode 100644
 index 00000000..e8c23a71

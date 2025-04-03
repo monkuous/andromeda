@@ -1,6 +1,7 @@
 #include "device.h"
 #include "compiler.h"
 #include "drv/biosdisk.h"
+#include "drv/console.h"
 #include "drv/loopback.h"
 #include "fs/pgcache.h"
 #include "fs/vfs.h"
@@ -75,8 +76,11 @@ int open_bdev(dev_t device, file_t *file, int flags) {
     return 0;
 }
 
-int open_cdev(dev_t, file_t *, int) {
-    return ENXIO;
+int open_cdev(dev_t device, file_t *file, int flags) {
+    switch (device >> 32) {
+    case DRIVER_CONSOLE: return open_console(device, file, flags);
+    default: return ENXIO;
+    }
 }
 
 static int flat_pgcache_read_page(pgcache_t *ptr, page_t *page, uint64_t idx) {

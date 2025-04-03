@@ -113,7 +113,7 @@ static void signal_or_fatal(idt_frame_t *frame, int signal) {
     if (frame->eip >= KERN_VIRT_BASE) handle_fatal_exception(frame);
 
     siginfo_t info = {.si_signo = signal};
-    send_signal(current->process, current, &info);
+    send_signal(current->process, current, &info, true);
 }
 
 static void setup_task_exception(tss_t *tss, uint32_t vector, size_t stack_offset) {

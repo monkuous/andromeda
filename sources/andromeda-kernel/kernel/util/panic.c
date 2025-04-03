@@ -1,6 +1,7 @@
 #include "panic.h"
 #include "init/bios.h"
 #include "util/print.h"
+#include "util/reset.h"
 #include <stdarg.h>
 
 [[noreturn]] void panic(const char *format, ...) {
@@ -23,6 +24,5 @@
 
     regs_t regs = {};
     intcall(0x16, &regs);
-    intcall(0x19, &regs);
-    __builtin_unreachable();
+    reset_system();
 }

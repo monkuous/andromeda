@@ -810,7 +810,10 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
         full_dirent_t cur;
         error = pgcache_read(&self->base.data, &cur, sizeof(cur), offset);
         if (unlikely(error)) return error;
-        if (!cur.common.length) break;
+        if (!cur.common.length) {
+            offset = (offset + (fs->base.block_size - 1)) & ~(fs->base.block_size - 1);
+            continue;
+        }
 
         // filter out . and ..
         if (cur.common.name_length != 1 || cur.common.name[0] >= 2) {
