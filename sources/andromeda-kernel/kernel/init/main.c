@@ -95,7 +95,7 @@ static void mount_initrd() {
     file_deref(file);
     if (unlikely(error)) panic("failed to create initrd loopback device (%d)", error);
 
-    error = vfs_mknod(nullptr, "/dev/initrd", 11, S_IFBLK | 0600, loopback_dev);
+    error = vfs_mknod(nullptr, "/dev/initrd", 11, S_IFBLK | 0400, loopback_dev);
     if (unlikely(error)) panic("failed to create initrd device file (%d)", error);
 
     bdev_t *bdev = resolve_bdev(loopback_dev);

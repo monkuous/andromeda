@@ -209,7 +209,7 @@ static bool process_drive(uint8_t id, uint64_t boot_lba) {
     unsigned char *name_buffer = &path_buffer[5];
     size_t name_length = path_length - 5;
 
-    int error = vfs_mknod(nullptr, path_buffer, path_length, S_IFBLK | 0600, bdev->base.id);
+    int error = vfs_mknod(nullptr, path_buffer, path_length, S_IFBLK | 0400, bdev->base.id);
     if (unlikely(error)) panic("biosdisk: mknod failed (%d)", error);
 
     if (boot_lba != UINT64_MAX) {
