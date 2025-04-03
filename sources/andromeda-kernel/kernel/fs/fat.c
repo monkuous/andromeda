@@ -278,7 +278,7 @@ static int create_inode(inode_t **out, fatfs_t *fs, fat_dirent_t *entry, ino_t i
     inode->cur.cluster = inode->cluster;
 
     if (entry->attr & DENT_DIRECTORY) {
-        inode->base.mode = S_IFDIR | 0755;
+        inode->base.mode = S_IFDIR | 0777;
         inode->base.nlink = 2;
         inode->base.directory = &fat_dir_ops;
 
@@ -300,15 +300,15 @@ static int create_inode(inode_t **out, fatfs_t *fs, fat_dirent_t *entry, ino_t i
             return error;
         }
     } else {
-        inode->base.mode = S_IFREG | 0755;
+        inode->base.mode = S_IFREG | 0777;
+        if (entry->attr & DENT_READ_ONLY) inode->base.mode &= ~0222;
+
         inode->base.nlink = 1;
         inode->base.size = entry->size;
         inode->base.blocks = (entry->size + (fs->base.block_size - 1)) / fs->base.block_size;
 
         pgcache_resize(&inode->base.data, inode->base.size);
     }
-
-    if (entry->attr & DENT_READ_ONLY) inode->base.mode &= ~0222;
 
     inode->base.atime = create_timespec(entry->access_date, 0, 0);
     inode->base.mtime = create_timespec(entry->write_date, entry->write_time, 0);
