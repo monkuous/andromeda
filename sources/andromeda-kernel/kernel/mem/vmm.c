@@ -491,6 +491,7 @@ static int remove_overlapping_regions(
             nreg->head = tail + 1;
             nreg->tail = cur->tail;
             nreg->flags = cur->flags;
+            nreg->prot = cur->prot;
             nreg->src = cur->src;
             nreg->offset = cur->offset + (nreg->head - cur->head);
 
@@ -797,6 +798,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             regions[0].head = head;
             regions[0].tail = tail;
             regions[0].flags = cur->flags;
+            regions[0].prot = cur->prot;
             regions[0].src = cur->src;
             regions[0].offset = cur->offset + (head - cur->head);
 
@@ -804,6 +806,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             regions[1].head = tail + 1;
             regions[1].tail = cur->tail;
             regions[1].flags = cur->flags;
+            regions[1].prot = cur->prot;
             regions[1].src = cur->src;
             regions[1].offset = cur->offset + (tail + 1 - cur->head);
 
@@ -837,6 +840,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             region->head = head;
             region->tail = cur->tail;
             region->flags = cur->flags;
+            region->prot = cur->prot;
             region->src = cur->src;
             region->offset = cur->offset + (head - cur->head);
 
@@ -861,6 +865,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             cur->head = tail + 1;
             cur->tail = region->tail;
             cur->flags = region->flags;
+            cur->prot = region->prot;
             cur->src = region->src;
             cur->offset = region->offset + (cur->head - region->head);
 

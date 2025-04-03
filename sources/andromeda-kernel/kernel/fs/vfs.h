@@ -29,6 +29,14 @@ typedef struct {
     uint32_t hash;
 } dname_t;
 
+typedef struct {
+    ino_t inode;
+    off_t offset;
+    unsigned short length;
+    unsigned char type;
+    unsigned char name[];
+} readdir_output_t;
+
 struct dentry {
     size_t references;
 
@@ -44,6 +52,9 @@ struct dentry {
     size_t count;
     size_t pcount; // the number of children with associated inodes
 
+    list_t child_list;
+    list_node_t node;
+
     fs_t *mounted_fs;
     inode_t *inode;
 };
@@ -58,6 +69,7 @@ typedef struct {
     int (*poll)(file_t *self);
     void (*poll_submit)(file_t *self, poll_waiter_t *waiter);
     void (*poll_cancel)(file_t *self, poll_waiter_t *waiter);
+    int (*readdir)(file_t *self, void *buffer, size_t *size);
 } file_ops_t;
 
 struct file {
@@ -193,5 +205,11 @@ ssize_t vfs_write(file_t *file, const void *buffer, ssize_t size);
 ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset);
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset);
 int vfs_ioctl(file_t *file, unsigned long request, void *arg);
+ssize_t vfs_readdir(file_t *file, void *buffer, ssize_t size);
 
 size_t vfs_alloc_path(void **out, dentry_t *entry);
+
+dentry_t *vfs_mount_bottom(dentry_t *entry);
+dentry_t *vfs_parent(dentry_t *entry);
+dentry_t *get_existing_dentry(dentry_t *parent, const void *name, size_t length);
+dentry_t *vfs_mount_top(dentry_t *entry);

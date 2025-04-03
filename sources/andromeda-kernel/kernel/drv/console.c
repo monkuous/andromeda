@@ -209,14 +209,26 @@ void init_console() {
 
 static size_t echo_count;
 
-static void do_print(unsigned char c) {
+static bool can_read_char() {
+    regs_t regs = {.eax = 0x100};
+    intcall(0x16, &regs);
+    return !(regs.eflags & 0x40);
+}
+
+static unsigned char read_char() {
+    regs_t regs = (regs_t){};
+    intcall(0x16, &regs);
+    return regs.eax & 0xff;
+}
+
+static void write_char(unsigned char c) {
     regs_t regs = {.eax = 0xe00 | c};
     intcall(0x10, &regs);
 }
 
 static void print_single(unsigned char c) {
-    if (c == '\n') do_print('\r');
-    do_print(c);
+    if (c == '\n') write_char('\r');
+    write_char(c);
 }
 
 void console_write(const void *buf, size_t len) {
@@ -235,22 +247,17 @@ void console_poll_events() {
     bool had_line = line_len != 0;
 
     for (;;) {
-        regs_t regs = {.eax = 0x100};
-        intcall(0x16, &regs);
-        if (regs.eflags & 0x40) break;
+        if (!can_read_char()) break;
 
-        regs = (regs_t){};
-        intcall(0x16, &regs);
-
-        unsigned char c = regs.eax & 0xff;
+        unsigned char c = read_char();
         if (c == '\r') c = '\n';
 
         switch (c) {
         case '\b':
             if (echo_count) {
-                do_print('\b');
-                do_print(' ');
-                do_print('\b');
+                write_char('\b');
+                write_char(' ');
+                write_char('\b');
                 echo_count -= 1;
             }
 

@@ -27,3 +27,5 @@ int sys_ACCESS(int dirfd, uintptr_t path, size_t length, int amode, int flags);
 int sys_CHDIR(int fd);
 int sys_CHROOT(int fd);
 ssize_t sys_GETCWD(uintptr_t buf, size_t size);
+ssize_t sys_READDIR(int fd, uintptr_t buf, size_t max_size);
+ssize_t sys_READLINK(int dirfd, uintptr_t path, size_t length, uintptr_t buffer, size_t size);

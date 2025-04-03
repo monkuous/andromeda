@@ -6,6 +6,7 @@
 #include "sys/memory.h"  /* IWYU pragma: keep */
 #include "sys/misc.h"    /* IWYU pragma: keep */
 #include "sys/process.h" /* IWYU pragma: keep*/
+#include "sys/system.h"  /* IWYU pragma: keep */
 #include "sys/thread.h"  /* IWYU pragma: keep */
 #include <andromeda/syscall.h>
 #include <errno.h>
@@ -102,7 +103,7 @@ void handle_syscall(idt_frame_t *frame) {
         break;                                                                                                         \
     }
         SYSHANDLER32(KLOG, 2)
-        SYSHANDLER64(MMAP, 5)
+        SYSHANDLER64(MMAP, 6)
         SYSHANDLER32(MUNMAP, 2)
         SYSHANDLER32(SET_TCB, 1)
         SYSHANDLER32(OPEN, 5)
@@ -137,6 +138,11 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(CHDIR, 1)
         SYSHANDLER32(CHROOT, 1)
         SYSHANDLER32(GETCWD, 2)
+        SYSHANDLER32(READDIR, 3)
+        SYSHANDLER32(READLINK, 5)
+        SYSHANDLER32(GETHOSTNAME, 2)
+        SYSHANDLER32(SETHOSTNAME, 2)
+        SYSHANDLER32(UNAME, 1)
     default:
 #if LOG_SYSCALLS
         printk("syscall: unknown syscall %u\n", frame->eax);

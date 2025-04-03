@@ -1,5 +1,14 @@
 script = files('kernel.lds')[0]
 
+config_data = configuration_data()
+config_data.set_quoted('ANDROMEDA_RELEASE', meson.project_version())
+config_data.set_quoted('ANDROMEDA_VERSION', '@VCS_TAG@')
+
+config = vcs_tag(
+    input: configure_file(configuration: config_data, output: 'config.h.in'),
+    output: 'config.h',
+)
+
 kernel_elf = executable(
     'kernel.elf',
     'cpu/gdt.c',
@@ -36,11 +45,13 @@ kernel_elf = executable(
     'sys/misc.c',
     'sys/process.c',
     'sys/syscall.c',
+    'sys/system.c',
     'sys/thread.c',
     'util/panic.c',
     'util/print.c',
     'util/reset.c',
     'util/string.c',
+    config,
     build_by_default: false,
     c_args: [
         '-ffreestanding',

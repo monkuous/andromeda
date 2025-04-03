@@ -8,3 +8,4 @@ packages:
       - andromeda-init
       - andromeda-kernel
       - bash
+      - coreutils

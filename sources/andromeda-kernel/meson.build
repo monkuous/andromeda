@@ -3,6 +3,7 @@ project(
     'c',
     default_options: ['c_std=gnu23', 'warning_level=2'],
     meson_version: '>=1.4.0',
+    version: '0.1.0',
 )
 
 objcopy = find_program('objcopy')

@@ -243,7 +243,10 @@ static void handle_kern_fault(idt_frame_t *frame, uintptr_t addr) {
     }
 
     size_t pdi = (addr >> 22) & 1023;
-    if (likely(CUR_PAGE_DIR[pdi] != kernel_page_dir[pdi])) {
+
+    if (pdi == ((PTBL_VIRT_BASE >> 22) & 1023)) pdi = (addr >> 12) & 1023;
+
+    if (pdi != ((PTBL_VIRT_BASE >> 22) & 1023) && likely(CUR_PAGE_DIR[pdi] != kernel_page_dir[pdi])) {
         CUR_PAGE_DIR[pdi] = kernel_page_dir[pdi];
         return;
     }

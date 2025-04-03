@@ -6,13 +6,108 @@
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/panic.h"
+#include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
 
-static ino_t ramfs_ino;
+static ino_t ramfs_ino = 1;
 static const inode_ops_t ramfs_inode_ops;
 
-static const file_ops_t ramfs_dir_ops;
+static ssize_t do_emit(void *buffer, size_t size, uint64_t pos, const void *name, size_t length, inode_t *inode) {
+    size_t len = offsetof(readdir_output_t, name) + length + 1;
+    if (len > size) return 0;
+
+    readdir_output_t *value = vmalloc(len);
+    value->inode = inode->ino;
+    value->offset = pos;
+    value->length = len;
+    value->type = IFTODT(inode->mode);
+    memcpy(value->name, name, length);
+    value->name[length] = 0;
+
+    int error = -user_memcpy(buffer, value, len);
+    vmfree(value, len);
+    if (unlikely(error)) return error;
+
+    return len;
+}
+
+static ssize_t emit_entry(file_t *self, void *buffer, size_t size) {
+    if (self->position == 0) {
+        ssize_t ret = do_emit(buffer, size, 0, ".", 1, self->inode);
+        if (unlikely(ret <= 0)) return ret;
+        self->position++;
+        return ret;
+    } else if (self->position == 1) {
+        ssize_t ret = do_emit(buffer, size, 0, "..", 2, vfs_parent(self->path)->inode);
+        if (unlikely(ret <= 0)) return ret;
+        self->position++;
+        return ret;
+    }
+
+    dentry_t *prev;
+    dentry_t *entry;
+    ssize_t ret;
+
+    do {
+        if (self->position == 2) {
+            prev = nullptr;
+            entry = container(dentry_t, node, self->path->child_list.first);
+        } else {
+            prev = (dentry_t *)(uintptr_t)self->position;
+            entry = container(dentry_t, node, prev->node.next);
+        }
+
+        if (!entry) return 0;
+
+        if (entry->inode) {
+            ret = do_emit(
+                    buffer,
+                    size,
+                    self->position,
+                    entry->name.data,
+                    entry->name.length,
+                    vfs_mount_top(entry)->inode
+            );
+            if (unlikely(ret <= 0)) break;
+        }
+
+        dentry_ref(entry);
+        if (prev) dentry_deref(prev);
+        self->position = (uintptr_t)entry;
+    } while (!entry->inode);
+
+    return ret;
+}
+
+static int ramfs_dir_readdir(file_t *self, void *buffer, size_t *size) {
+    size_t rem = *size;
+    size_t tot = 0;
+
+    while (rem) {
+        ssize_t s = emit_entry(self, buffer, rem);
+        if (unlikely(s < 0)) return s;
+        if (s == 0) break;
+
+        buffer += s;
+        tot += s;
+        rem -= s;
+    }
+
+    *size = tot;
+    return 0;
+}
+
+static void ramfs_dir_free(file_t *self) {
+    if (self->position > 2) {
+        dentry_deref((dentry_t *)(uintptr_t)self->position);
+    }
+}
+
+static const file_ops_t ramfs_dir_ops = {
+        .free = ramfs_dir_free,
+        .readdir = ramfs_dir_readdir,
+};
 
 static void ramfs_inode_free(inode_t *self) {
     vmfree(self, sizeof(*self));

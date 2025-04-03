@@ -5,11 +5,13 @@
 #include "fs/vfs.h"
 #include "mem/pmap.h"
 #include "mem/pmem.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/container.h"
 #include "util/panic.h"
 #include "util/time.h"
+#include <dirent.h>
 #include <errno.h>
 #include <stdint.h>
 #include <sys/statvfs.h>
@@ -173,7 +175,153 @@ static const pgcache_ops_t fat_pgcache_ops = {
         .read_page = fat_pgcache_read_page,
 };
 
-static const file_ops_t fat_dir_ops;
+static void get_dir_info(fatfs_t *fs, fat_inode_t *inode, uint64_t *ino_offset, uint64_t *max) {
+    if (inode->cluster >= 2) {
+        if (ino_offset) {
+            *ino_offset = (fs->data_block << fs->device->block_shift) + (uint64_t)inode->cluster * fs->base.block_size;
+        }
+
+        *max = inode->base.blocks * fs->base.block_size;
+    } else {
+        if (ino_offset) *ino_offset = fs->root_block << fs->device->block_shift;
+        *max = fs->root_size;
+    }
+}
+
+static size_t conv_fatname(unsigned char *out, fat_dirent_t *entry) {
+    unsigned char *start = out;
+    size_t last = 0;
+
+    for (size_t i = 0; i < sizeof(entry->name); i++) {
+        if (i == 8) {
+            *out++ = '.';
+            last = i;
+        }
+
+        unsigned char c = entry->name[i];
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+
+        if (c != ' ') {
+            if (last != i) {
+                size_t cnt = i - last;
+                memset(out, ' ', cnt);
+                out += cnt;
+            }
+
+            *out++ = c;
+            last = i + 1;
+        }
+    }
+
+    return out - start;
+}
+
+static ssize_t emit_direntry(file_t *self, void *buffer, size_t size) {
+    fat_inode_t *inode = (fat_inode_t *)self->inode;
+    fatfs_t *fs = (fatfs_t *)inode->base.filesystem;
+
+    // using alloca is fine here, the size is small and known at compile time
+    // the name is at most 13 bytes: 8.3 is 12 bytes, and a null terminator makes it 13
+    readdir_output_t *value = __builtin_alloca(offsetof(readdir_output_t, name) + 13);
+    uint64_t orig_pos = self->position;
+
+    if (self->position == 0) {
+        self->position++;
+        value->inode = inode->base.ino;
+        value->offset = 0;
+        value->length = offsetof(readdir_output_t, name) + 2;
+        value->type = DT_DIR;
+        value->name[0] = '.';
+        value->name[1] = 0;
+    } else if (self->position == 1) {
+        self->position++;
+        value->inode = vfs_parent(self->path)->inode->ino;
+        value->offset = 0;
+        value->length = offsetof(readdir_output_t, name) + 3;
+        value->type = DT_DIR;
+        value->name[0] = '.';
+        value->name[1] = '.';
+        value->name[2] = 0;
+    } else {
+        uint64_t ino_offset;
+        uint64_t max;
+        get_dir_info(fs, inode, &ino_offset, &max);
+        max += 2;
+
+        value->length = 0;
+
+        for (; self->position < max && !value->length; self->position += sizeof(fat_dirent_t)) {
+            uint64_t off = self->position - 2;
+            fat_dirent_t entry;
+            int error = pgcache_read(&inode->base.data, &entry, sizeof(entry), off);
+            if (unlikely(error)) return error;
+
+            if (entry.name[0] == 0) break;
+            if (entry.name[0] == 0xe5) continue;
+
+            if (entry.attr & DENT_VOLUME_ID) continue;
+
+            if (!memcmp(entry.name, ".          ", 11)) continue;
+            if (!memcmp(entry.name, "..         ", 11)) continue;
+
+            size_t len = conv_fatname(value->name, &entry);
+            if (!len) continue;
+
+            value->inode = ino_offset + off;
+            value->offset = self->position;
+            value->length = offsetof(readdir_output_t, name) + len + 1;
+            value->type = entry.attr & DENT_DIRECTORY ? DT_DIR : DT_REG;
+            value->name[len] = 0;
+
+            dentry_t *dent = get_existing_dentry(self->path, value->name, len);
+            if (dent) {
+                dent = vfs_mount_top(dent);
+
+                if (dent->inode) {
+                    value->inode = dent->inode->ino;
+                    value->type = IFTODT(dent->inode->mode);
+                }
+            }
+        }
+
+        if (!value->length) return 0;
+    }
+
+    if (value->length > size) {
+        self->position = orig_pos;
+        return 0;
+    }
+
+    int error = -user_memcpy(buffer, value, value->length);
+    if (unlikely(error)) {
+        self->position = orig_pos;
+        return error;
+    }
+
+    return value->length;
+}
+
+static int fat_dir_readdir(file_t *self, void *buffer, size_t *size) {
+    size_t rem = *size;
+    size_t tot = 0;
+
+    while (rem) {
+        ssize_t cur = emit_direntry(self, buffer, rem);
+        if (unlikely(cur < 0)) return cur;
+        if (cur == 0) break;
+
+        buffer += cur;
+        tot += cur;
+        rem -= cur;
+    }
+
+    *size = tot;
+    return 0;
+}
+
+static const file_ops_t fat_dir_ops = {
+        .readdir = fat_dir_readdir,
+};
 
 static void fat_inode_free(inode_t *ptr) {
     fat_inode_t *self = (fat_inode_t *)ptr;
@@ -247,7 +395,8 @@ static int get_block_count(fatfs_t *fs, uint32_t cluster, blkcnt_t *out) {
 }
 
 static int dirino_init(fatfs_t *fs, fat_inode_t *inode) {
-    uint64_t max = inode->cluster >= 2 ? (uint64_t)inode->base.blocks * fs->base.block_size : fs->root_size;
+    uint64_t max;
+    get_dir_info(fs, inode, nullptr, &max);
 
     for (uint64_t i = 0; i < max; i += sizeof(fat_dirent_t)) {
         fat_dirent_t entry;
@@ -329,13 +478,7 @@ static int fat_inode_lookup(inode_t *ptr, dentry_t *entry) {
     uint64_t ino_offset;
     uint64_t max;
 
-    if (self->cluster >= 2) {
-        ino_offset = (fs->data_block << fs->device->block_shift) + (uint64_t)self->cluster * fs->base.block_size;
-        max = self->base.blocks * fs->base.block_size;
-    } else {
-        ino_offset = fs->root_block << fs->device->block_shift;
-        max = fs->root_size;
-    }
+    get_dir_info(fs, self, &ino_offset, &max);
 
     for (uint64_t off = 0; off < max; off += sizeof(fat_dirent_t)) {
         fat_dirent_t cur;
@@ -501,6 +644,9 @@ int fat_create(fs_t **out, void *ctx) {
 
     fat_dirent_t root_dirent = {
             .attr = DENT_DIRECTORY,
+            .access_date = (1 << 5) | 1,
+            .creation_date = (1 << 5) | 1,
+            .write_date = (1 << 5) | 1,
     };
 
     if (!is_fat32) {
@@ -514,7 +660,7 @@ int fat_create(fs_t **out, void *ctx) {
     }
 
     inode_t *root;
-    error = create_inode(&root, fs, &root_dirent, UINT64_MAX);
+    error = create_inode(&root, fs, &root_dirent, 1);
     if (unlikely(error)) {
         pgcache_resize(&fs->fat.base, 0);
         vmfree(fs, sizeof(*fs));

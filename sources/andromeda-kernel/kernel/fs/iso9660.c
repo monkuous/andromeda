@@ -5,11 +5,14 @@
 #include "fs/vfs.h"
 #include "mem/pmap.h"
 #include "mem/pmem.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "string.h"
+#include "sys/system.h"
 #include "util/container.h"
 #include "util/panic.h"
 #include "util/time.h"
+#include <dirent.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,9 +20,8 @@
 #include <sys/statvfs.h>
 #include <time.h>
 
-#define INO_BASE 0
+#define INO_BASE 1
 
-static const file_ops_t iso9660_dir_ops;
 static const inode_ops_t iso9660_inode_ops;
 
 typedef struct {
@@ -370,9 +372,8 @@ static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *o
                     cdata = ".";
                     clen = 1;
                 } else if (cur_su->nm.flags & SUSP_NM_HOSTNAME) {
-                    // TODO: Actually get the hostname properly
-                    cdata = "<hostname>";
-                    clen = 10;
+                    cdata = hostname;
+                    clen = hostname_len;
                 }
 
                 size_t tlen = clen + out->nm.length;
@@ -412,9 +413,8 @@ static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *o
                         vmfree(out->sl.target, out->sl.length);
                         out->sl.length = vfs_alloc_path(&out->sl.target, fs->base.mountpoint);
                     } else if (component->flags & SUSP_SL_HOSTNAME) {
-                        // TODO: Actually get the hostname properly
-                        cdata = "<hostname>";
-                        clen = 10;
+                        cdata = hostname;
+                        clen = hostname_len;
                     }
 
                     if (clen) {
@@ -503,18 +503,46 @@ static void rr_cleanup(struct rr_info *info) {
     vmfree(info->sl.target, info->sl.length);
 }
 
+static int dir_next(iso9660_fs_t *fs, iso9660_inode_t *inode, full_dirent_t *entry, uint64_t *offset) {
+again:
+    uint64_t off = *offset;
+    if (off >= inode->base.size) return 0;
+
+    uint64_t rmax = inode->base.size - off;
+    size_t cur = rmax < sizeof(*entry) ? rmax : sizeof(*entry);
+
+    if (cur < offsetof(full_dirent_t, common.name)) return 0;
+
+    int error = -pgcache_read(&inode->base.data, entry, cur, off);
+    if (unlikely(error)) return error;
+
+    if (!entry->common.length) {
+        *offset = (off + (fs->base.block_size - 1)) & ~(fs->base.block_size - 1);
+        goto again;
+    }
+
+    if (cur != sizeof(*entry)) {
+        memset((void *)entry + cur, 0, sizeof(*entry) - cur);
+    }
+
+    off += entry->common.length;
+    *offset = off;
+    return 1;
+}
+
 static int dirino_init(iso9660_fs_t *fs, iso9660_inode_t *inode, struct rr_info *rr_info) {
     if (fs->need_px) return 0;
 
     uint64_t offset = 0;
 
-    while (offset < inode->base.size) {
+    for (;;) {
+        uint64_t orig_off = offset;
         full_dirent_t entry;
-        int error = pgcache_read(&inode->base.data, &entry, sizeof(entry), offset);
-        if (unlikely(error)) return error;
-        if (!entry.common.length) break;
+        int error = dir_next(fs, inode, &entry, &offset);
+        if (unlikely(error < 0)) return error;
+        if (!error) break;
 
-        if (inode->base.ino == INO_BASE && offset == 0) {
+        if (inode->base.ino == INO_BASE && orig_off == 0) {
             // Check for SUSP presence
             size_t offset = get_susp_off(entry.common.name_length, 0);
 
@@ -537,12 +565,14 @@ static int dirino_init(iso9660_fs_t *fs, iso9660_inode_t *inode, struct rr_info 
         if (entry.common.name_length != 1 || entry.common.name[0] >= 2) {
             if (entry.common.flags & DENT_DIRECTORY) inode->base.nlink += 1;
         }
-
-        offset += entry.common.length;
     }
 
     return 0;
 }
+
+static int iso9660_dir_readdir(file_t *self, void *buffer, size_t *size);
+
+static const file_ops_t iso9660_dir_ops = {.readdir = iso9660_dir_readdir};
 
 static int create_inode(
         inode_t **out,
@@ -722,21 +752,17 @@ static int get_extent_list(
     return 0;
 }
 
-static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *entry, dentry_t *dent, uint64_t offset) {
-    struct rr_info rr_info = {};
-    int error = get_rr_info(fs, entry, &rr_info);
-    if (unlikely(error)) return error;
-    if (rr_info.have_rn) goto exit; // skip entries with RE
+static ino_t diroff_to_inode(iso9660_fs_t *fs, iso9660_inode_t *self, uint64_t offset) {
+    return INO_BASE + (fblock_to_lba(self, offset >> fs->block_shift) << fs->block_shift) + offset;
+}
 
-    void *name;
-    size_t len;
-
-    if (rr_info.nm.length) {
-        name = rr_info.nm.data;
-        len = rr_info.nm.length;
+static size_t get_name(void **out, full_dirent_t *entry, struct rr_info *rr_info) {
+    if (rr_info->nm.length) {
+        *out = rr_info->nm.data;
+        return rr_info->nm.length;
     } else {
         // transform name so that it can be memcmp'd
-        len = entry->common.name_length;
+        size_t len = entry->common.name_length;
 
         if (!(entry->common.flags & DENT_DIRECTORY)) {
             // get rid of ;<version>
@@ -751,30 +777,49 @@ static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *en
             unsigned char c = entry->common.name[i];
             if (c >= 'A' && c <= 'Z') entry->common.name[i] = c + ('a' - 'A');
         }
+
+        return len;
+    }
+}
+
+static int get_real_dirent(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *rr_info) {
+    if (rr_info->have_cl) {
+        // get actual data from . entry
+        extent_t temp_extent = {
+                rr_info->cl.lba,
+                UINT32_MAX,
+        };
+        iso9660_inode_t temp_inode = {
+                .base.filesystem = &fs->base,
+                .base.data.ops = &iso9660_pgcache_ops,
+                .extents = &temp_extent,
+                .num_extents = 1,
+                .cur.extent = &temp_extent,
+        };
+        pgcache_resize(&temp_inode.base.data, sizeof(*entry));
+        int error = pgcache_read(&temp_inode.base.data, entry, sizeof(*entry), 0);
+        pgcache_resize(&temp_inode.base.data, 0);
+        rr_cleanup(rr_info);
+        if (unlikely(error)) return error;
+        error = get_rr_info(fs, entry, rr_info);
+        if (unlikely(error)) return error;
     }
 
+    return 0;
+}
+
+static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *entry, dentry_t *dent, uint64_t offset) {
+    struct rr_info rr_info = {};
+    int error = get_rr_info(fs, entry, &rr_info);
+    if (unlikely(error)) return error;
+    if (rr_info.have_rn) goto exit; // skip entries with RE
+
+    void *name;
+    size_t len = get_name(&name, entry, &rr_info);
+
     if (len == dent->name.length && !memcmp(name, dent->name.data, len)) {
-        if (rr_info.have_cl) {
-            // get actual data from . entry
-            extent_t temp_extent = {
-                    rr_info.cl.lba,
-                    UINT32_MAX,
-            };
-            iso9660_inode_t temp_inode = {
-                    .base.filesystem = &fs->base,
-                    .base.data.ops = &iso9660_pgcache_ops,
-                    .extents = &temp_extent,
-                    .num_extents = 1,
-                    .cur.extent = &temp_extent,
-            };
-            pgcache_resize(&temp_inode.base.data, sizeof(*entry));
-            error = pgcache_read(&temp_inode.base.data, entry, sizeof(*entry), 0);
-            pgcache_resize(&temp_inode.base.data, 0);
-            if (unlikely(error)) goto exit;
-            rr_cleanup(&rr_info);
-            error = get_rr_info(fs, entry, &rr_info);
-            if (unlikely(error)) return error;
-        }
+        error = get_real_dirent(fs, entry, &rr_info);
+        if (unlikely(error)) return error; // get_real_dirent cleans up rr_info on failure
 
         extent_t *extents;
         size_t ext_count;
@@ -786,7 +831,7 @@ static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *en
                 &dent->inode,
                 fs,
                 &entry->common,
-                INO_BASE + (fblock_to_lba(self, offset >> fs->block_shift) << fs->block_shift) + offset,
+                diroff_to_inode(fs, self, offset),
                 extents,
                 ext_count,
                 size,
@@ -806,26 +851,146 @@ static int iso9660_inode_lookup(inode_t *ptr, dentry_t *entry) {
     uint64_t offset = 0;
     int error = 0;
 
-    while (offset < self->base.size) {
+    for (;;) {
+        uint64_t orig_off = offset;
         full_dirent_t cur;
-        error = pgcache_read(&self->base.data, &cur, sizeof(cur), offset);
-        if (unlikely(error)) return error;
-        if (!cur.common.length) {
-            offset = (offset + (fs->base.block_size - 1)) & ~(fs->base.block_size - 1);
-            continue;
-        }
+        error = dir_next(fs, self, &cur, &offset);
+        if (unlikely(error < 0)) return error;
+        if (!error) break;
 
         // filter out . and ..
         if (cur.common.name_length != 1 || cur.common.name[0] >= 2) {
-            int error = try_dirent(fs, self, &cur, entry, offset);
+            int error = try_dirent(fs, self, &cur, entry, orig_off);
             if (unlikely(error)) return error;
             if (entry->inode) return 0;
         }
-
-        offset += cur.common.length;
     }
 
     return ENOENT;
+}
+
+static ssize_t do_emit(
+        void *buffer,
+        size_t size,
+        uint64_t pos,
+        const void *name,
+        size_t length,
+        ino_t ino,
+        unsigned char type
+) {
+    size_t len = offsetof(readdir_output_t, name) + length + 1;
+    if (len > size) return 0;
+
+    readdir_output_t *value = vmalloc(len);
+    value->inode = ino;
+    value->offset = pos;
+    value->length = len;
+    value->type = type;
+    memcpy(value->name, name, length);
+    value->name[length] = 0;
+
+    int error = -user_memcpy(buffer, value, len);
+    vmfree(value, len);
+    if (unlikely(error)) return error;
+
+    return len;
+}
+
+static ssize_t emit_direntry(file_t *self, void *buffer, size_t size) {
+    if (self->position == 0) {
+        ssize_t ret = do_emit(buffer, size, 0, ".", 1, self->inode->ino, DT_DIR);
+        if (unlikely(ret <= 0)) return ret;
+        self->position++;
+        return ret;
+    } else if (self->position == 1) {
+        ssize_t ret = do_emit(buffer, size, 0, "..", 2, vfs_parent(self->path)->inode->ino, DT_DIR);
+        if (unlikely(ret <= 0)) return ret;
+        self->position++;
+        return ret;
+    }
+
+    iso9660_inode_t *inode = (iso9660_inode_t *)self->inode;
+    iso9660_fs_t *fs = (iso9660_fs_t *)inode->base.filesystem;
+
+    uint64_t offset = self->position - 2;
+    int error = 0;
+
+    for (;;) {
+        uint64_t orig_off = offset;
+        full_dirent_t cur;
+        error = dir_next(fs, inode, &cur, &offset);
+        if (unlikely(error < 0)) return error;
+        if (!error) break;
+
+        // filter out . and ..
+        if (cur.common.name_length != 1 || cur.common.name[0] >= 2) {
+            struct rr_info rr_info = {};
+            int error = get_rr_info(fs, &cur, &rr_info);
+            if (unlikely(error)) return error;
+            if (rr_info.have_rn) goto skip; // skip entries with RE
+
+            void *name;
+            size_t len = get_name(&name, &cur, &rr_info);
+
+            error = get_real_dirent(fs, &cur, &rr_info);
+            if (unlikely(error)) return error; // get_real_dirent cleans up rr_info on failure
+
+            ino_t ino = 0;
+            unsigned char type = DT_UNKNOWN;
+
+            dentry_t *dent = get_existing_dentry(self->path, name, len);
+            if (dent) {
+                dent = vfs_mount_top(dent);
+
+                if (dent->inode) {
+                    ino = dent->inode->ino;
+                    type = IFTODT(dent->inode->mode);
+                }
+            }
+
+            if (!ino) {
+                ino = diroff_to_inode(fs, inode, orig_off);
+
+                if (rr_info.have_px) {
+                    type = IFTODT(rr_info.px.mode);
+                } else if (cur.common.flags & DENT_DIRECTORY) {
+                    type = DT_DIR;
+                } else {
+                    type = DT_REG;
+                }
+            }
+
+            ssize_t ret = do_emit(buffer, size, self->position, name, len, ino, type);
+            rr_cleanup(&rr_info);
+            if (unlikely(ret <= 0)) return ret;
+            self->position = offset + 2;
+            return ret;
+        skip:
+            rr_cleanup(&rr_info);
+        }
+
+        self->position = offset + 2;
+    }
+
+    return 0;
+}
+
+static int iso9660_dir_readdir(file_t *self, void *buffer, size_t *size) {
+    size_t rem = *size;
+    size_t tot = 0;
+
+    while (rem) {
+        ssize_t cur = emit_direntry(self, buffer, rem);
+        if (unlikely(cur < 0)) return cur;
+        if (cur == 0) break;
+
+        buffer += cur;
+        tot += cur;
+        rem -= cur;
+    }
+
+    *size = tot;
+    return 0;
 }
 
 static const inode_ops_t iso9660_inode_ops = {

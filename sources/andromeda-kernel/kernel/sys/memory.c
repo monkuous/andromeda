@@ -1,7 +1,6 @@
 #include "memory.h"
 #include "compiler.h"
 #include "fs/vfs.h"
-#include "mem/pmem.h"
 #include "mem/vmm.h"
 #include "proc/exec.h"
 #include "proc/process.h"
@@ -10,7 +9,7 @@
 #include <stdint.h>
 #include <sys/mman.h>
 
-int64_t sys_MMAP(uintptr_t hint, size_t len, int fprot, int fd, off_t idx) {
+int64_t sys_MMAP(uintptr_t hint, size_t len, int fprot, int fd, uint32_t off_low, uint32_t off_high) {
     int flags = fprot & 0xfffffff;
     int prot = fprot >> 28;
     int error;
@@ -21,7 +20,7 @@ int64_t sys_MMAP(uintptr_t hint, size_t len, int fprot, int fd, off_t idx) {
         if (unlikely(error)) return error;
     }
 
-    error = -vm_map(&hint, len, flags, prot, file, (uint64_t)idx << PAGE_SHIFT);
+    error = -vm_map(&hint, len, flags, prot, file, ((uint64_t)off_high << 32) | off_low);
     if (file) file_deref(file);
     if (unlikely(error)) return error;
 

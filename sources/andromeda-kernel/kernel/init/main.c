@@ -11,9 +11,12 @@
 #include "init/bios.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
+#include "mem/vmalloc.h"
 #include "proc/exec.h"
 #include "proc/process.h"
 #include "proc/sched.h"
+#include "string.h"
+#include "sys/system.h"
 #include "util/panic.h"
 #include "util/print.h"
 #include <andromeda/string.h>
@@ -36,6 +39,10 @@ static void init_video() {
 
 // Mounts a ramfs on /, sets up cwd and umask, and creates some of the basic folder structure
 static void init_vfs() {
+    hostname_len = 9;
+    hostname = vmalloc(hostname_len);
+    memcpy(hostname, "andromeda", hostname_len);
+
     struct ramfs_create_ctx ramfs_ctx = {.mode = 0755};
     int error = vfs_mount(nullptr, "/", 1, ramfs_create, &ramfs_ctx);
     if (unlikely(error)) panic("failed to mount root (%d)", error);

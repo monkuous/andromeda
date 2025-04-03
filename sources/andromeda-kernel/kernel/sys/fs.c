@@ -502,3 +502,46 @@ ssize_t sys_GETCWD(uintptr_t buf, size_t size) {
 
     return len;
 }
+
+ssize_t sys_READDIR(int fd, uintptr_t buf, size_t max_size) {
+    int error = -verify_pointer(buf, max_size);
+    if (unlikely(error)) return error;
+
+    file_t *file;
+    error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    if (max_size > 0x7fffffff) max_size = 0x7fffffff;
+
+    ssize_t ret = vfs_readdir(file, (void *)buf, max_size);
+    file_deref(file);
+    return ret;
+}
+
+ssize_t sys_READLINK(int dirfd, uintptr_t path, size_t length, uintptr_t buffer, size_t size) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer(buffer, size);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto error;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto error;
+
+    if (size > 0x7fffffff) size = 0x7fffffff;
+
+    error = -vfs_readlink(rel, buf, length, (void *)buffer, &size);
+    if (rel) file_deref(rel);
+    if (unlikely(error)) goto error;
+
+    vmfree(buf, length);
+    return size;
+error:
+    vmfree(buf, length);
+    return error;
+}

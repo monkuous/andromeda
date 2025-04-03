@@ -10,6 +10,7 @@
 #include "proc/sched.h"
 #include "string.h"
 #include "util/hash.h"
+#include "util/list.h"
 #include "util/panic.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -25,7 +26,7 @@
 
 static dentry_t root_dentry = {.references = 1};
 static fs_t anon_fs = {.device = DEVICE_ID(DRIVER_PSEUDO_FS, 0), .block_size = PAGE_SIZE, .max_name_len = NAME_MAX};
-static ino_t anon_ino;
+static ino_t anon_ino = 1;
 
 static void maybe_expand(dentry_t *entry) {
     if (entry->count < (entry->capacity - (entry->capacity / 4))) return;
@@ -69,6 +70,8 @@ static void insert_dentry(dentry_t *entry) {
 
     parent->count += 1;
     if (entry->inode) parent->pcount += 1;
+
+    list_insert_tail(&parent->child_list, &entry->node);
 }
 
 static void remove_dentry(dentry_t *entry) {
@@ -82,6 +85,8 @@ static void remove_dentry(dentry_t *entry) {
 
     parent->count -= 1;
     if (entry->inode) parent->pcount -= 1;
+
+    list_remove(&parent->child_list, &entry->node);
 }
 
 void dentry_ref(dentry_t *entry) {
@@ -517,26 +522,17 @@ static int resolve(dentry_t *rel, const unsigned char *path, size_t length, dent
             return ENAMETOOLONG;
         }
 
-        if (length == 2 && path[0] == '.' && path[1] == '.') {
-            dentry_t *cur = rel;
+        if (complen == 2 && path[0] == '.' && path[1] == '.') {
+            dentry_t *cur = vfs_parent(rel);
 
-            for (;;) {
-                if (cur == current->process->root->path) break;
-
-                if (!cur->parent) {
-                    cur = cur->filesystem->mountpoint;
-                    continue;
-                }
-
-                dentry_t *par = cur->parent;
-                dentry_ref(par);
+            if (cur != rel) {
+                dentry_ref(cur);
                 dentry_deref(rel);
-                rel = par;
-                break;
+                rel = cur;
             }
 
             was_dot = true;
-        } else if (length != 1 || path[0] != '.') {
+        } else if (complen != 1 || path[0] != '.') {
             dentry_t *child;
             int error = simple_lookup(rel, path, complen, &child);
             dentry_deref(rel);
@@ -1158,7 +1154,7 @@ static int do_stat(inode_t *inode, struct stat *out) {
             .st_gid = inode->gid,
             .st_size = inode->size,
             .st_blksize = inode->filesystem->block_size,
-            .st_blocks = inode->filesystem->blocks,
+            .st_blocks = inode->blocks,
             .st_ino = inode->ino,
             .st_atim = inode->atime,
             .st_ctim = inode->ctime,
@@ -1290,6 +1286,7 @@ int vfs_fchmod(file_t *file, mode_t mode) {
 
 off_t vfs_seek(file_t *file, off_t offset, int whence) {
     if (unlikely(!file->ops)) return -EBADF;
+    if (unlikely(S_ISDIR(file->inode->mode))) return -EISDIR;
     if (unlikely(!file->ops->seek)) return -ESPIPE;
 
     uint64_t pos = (int64_t)offset;
@@ -1313,6 +1310,7 @@ static ssize_t do_rw_op(
     if (unlikely(!size)) return 0;
     if (unlikely(size < 0)) return -EINVAL;
     if (unlikely(offset < 0)) return -EINVAL;
+    if (unlikely(S_ISDIR(file->inode->mode))) return -EISDIR;
     if (unlikely(!func)) return -ENOSYS;
 
     int error = access_file(file, amode);
@@ -1326,19 +1324,37 @@ static ssize_t do_rw_op(
 }
 
 ssize_t vfs_read(file_t *file, void *buffer, ssize_t size) {
+    if (unlikely(!file->ops)) return -EBADF;
     return do_rw_op(file, buffer, size, R_OK, file->ops->read, file->position, true);
 }
 
 ssize_t vfs_write(file_t *file, const void *buffer, ssize_t size) {
+    if (unlikely(!file->ops)) return -EBADF;
     return do_rw_op(file, (void *)buffer, size, W_OK, file->ops->write, file->position, true);
 }
 
 ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset) {
+    if (unlikely(!file->ops)) return -EBADF;
     return do_rw_op(file, buffer, size, R_OK, file->ops->read, offset, false);
 }
 
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset) {
+    if (unlikely(!file->ops)) return -EBADF;
     return do_rw_op(file, (void *)buffer, size, W_OK, file->ops->write, offset, false);
+}
+
+ssize_t vfs_readdir(file_t *file, void *buffer, ssize_t size) {
+    if (unlikely(!file->ops)) return -EBADF;
+    if (unlikely(!file->ops->readdir)) return -ENOTDIR;
+    if (unlikely(size < 0)) return -EINVAL;
+    if (unlikely(size == 0)) return 0;
+    if (unlikely(file->path->inode != file->inode)) return 0;
+
+    size_t s = size;
+    int error = file->ops->readdir(file, buffer, &s);
+    if (unlikely(error)) return -error;
+
+    return s;
 }
 
 static size_t format_path(unsigned char *buffer, size_t length, dentry_t *entry) {
@@ -1384,4 +1400,34 @@ size_t vfs_alloc_path(void **out, dentry_t *entry) {
     format_path(buf, length, entry);
     *out = buf;
     return length;
+}
+
+dentry_t *vfs_parent(dentry_t *entry) {
+    dentry_t *orig = entry;
+
+    for (;;) {
+        if (entry == current->process->root->path) return orig;
+        if (entry->parent) return entry->parent;
+
+        entry = entry->filesystem->mountpoint;
+    }
+}
+
+dentry_t *get_existing_dentry(dentry_t *parent, const void *name, size_t length) {
+    if (!parent->capacity) return nullptr;
+
+    uint32_t hash = make_hash_blob(name, length);
+    size_t bucket = hash & (parent->capacity - 1);
+    dentry_t *entry = parent->children[bucket];
+
+    while (entry && !entry_matches(entry, name, length, hash)) {
+        entry = entry->next;
+    }
+
+    return entry;
+}
+
+dentry_t *vfs_mount_top(dentry_t *entry) {
+    while (entry->mounted_fs) entry = entry->mounted_fs->root;
+    return entry;
 }
