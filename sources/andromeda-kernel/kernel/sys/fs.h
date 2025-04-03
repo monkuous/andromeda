@@ -29,3 +29,4 @@ int sys_CHROOT(int fd);
 ssize_t sys_GETCWD(uintptr_t buf, size_t size);
 ssize_t sys_READDIR(int fd, uintptr_t buf, size_t max_size);
 ssize_t sys_READLINK(int dirfd, uintptr_t path, size_t length, uintptr_t buffer, size_t size);
+int64_t sys_PIPE(int flags);

@@ -143,6 +143,7 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(GETHOSTNAME, 2)
         SYSHANDLER32(SETHOSTNAME, 2)
         SYSHANDLER32(UNAME, 1)
+        SYSHANDLER64(PIPE, 1)
     default:
 #if LOG_SYSCALLS
         printk("syscall: unknown syscall %u\n", frame->eax);

@@ -1,6 +1,7 @@
 #include "vfs.h"
 #include "compiler.h"
 #include "drv/device.h"
+#include "fs/fifo.h"
 #include "fs/pgcache.h"
 #include "klimits.h"
 #include "mem/pmem.h"
@@ -121,6 +122,16 @@ void file_deref(file_t *file) {
     if (--file->references == 0) {
         if (file->ops && file->ops->free) file->ops->free(file);
 
+        if (S_ISFIFO(file->inode->mode)) {
+            if (!access_file(file, R_OK)) {
+                if (!--file->inode->fifo.num_readers) fifo_no_readers(file->inode);
+            }
+
+            if (!access_file(file, W_OK)) {
+                if (!--file->inode->fifo.num_writers) fifo_no_readers(file->inode);
+            }
+        }
+
         inode_deref(file->inode);
         if (file->path) dentry_deref(file->path);
         vmfree(file, sizeof(*file));
@@ -140,6 +151,7 @@ void inode_deref(inode_t *inode) {
 
         switch (inode->mode & S_IFMT) {
         case S_IFLNK: vmfree(inode->symlink, inode->size); break;
+        case S_IFIFO: vmfree(inode->fifo.buffer, PIPE_BUF); break;
         }
 
         inode->ops->free(inode);
@@ -170,11 +182,13 @@ void init_inode(fs_t *fs, inode_t *inode) {
     inode->references = 1;
     inode->filesystem = fs;
     fs->indirect_refs += 1;
+
+    if (S_ISFIFO(inode->mode)) {
+        fifo_init(inode);
+    }
 }
 
 void init_new_inode(fs_t *fs, inode_t *parent, inode_t *inode, mode_t mode, dev_t device) {
-    init_inode(fs, inode);
-
     inode->mode = mode;
     inode->uid = current->process->euid;
     inode->gid = current->process->egid;
@@ -189,6 +203,8 @@ void init_new_inode(fs_t *fs, inode_t *parent, inode_t *inode, mode_t mode, dev_
     case S_IFCHR: inode->device = device; break;
     case S_IFDIR: inode->nlink = parent ? 1 : 2; break; // for the . entry (and .. if root)
     }
+
+    init_inode(fs, inode);
 }
 
 static void anon_inode_free(inode_t *self) {
@@ -331,6 +347,7 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
         int error = 0;
 
         switch (inode->mode & S_IFMT) {
+        case S_IFLNK: error = ELOOP; break;
         case S_IFDIR: file->ops = inode->directory; break;
         case S_IFREG:
             file->ops = &regular_file_ops;
@@ -340,7 +357,35 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
             break;
         case S_IFBLK: error = open_bdev(inode->device, file, flags); break;
         case S_IFCHR: error = open_cdev(inode->device, file, flags); break;
-        default: error = ELOOP; break;
+        case S_IFIFO:
+            file->ops = &fifo_ops;
+            bool is_read = !access_file(file, R_OK);
+            bool is_write = !access_file(file, W_OK);
+
+            if (is_write) {
+                // waiting for a read side is done by sys_OPEN, but we do have to take care of O_NONBLOCK first
+
+                if (!is_read && inode->fifo.num_readers == 0 && (flags & O_NONBLOCK)) {
+                    error = ENXIO;
+                } else if (inode->fifo.num_writers++ == 0) {
+                    list_foreach(inode->fifo.open_read_waiting, fifo_open_wait_ctx_t, node, cur) {
+                        sched_unblock(cur->thread);
+                    }
+                }
+            }
+
+            if (likely(!error) && is_read) {
+                // waiting for a write side is done by sys_OPEN
+
+                if (inode->fifo.num_readers++ == 0) {
+                    list_foreach(inode->fifo.open_write_waiting, fifo_open_wait_ctx_t, node, cur) {
+                        sched_unblock(cur->thread);
+                    }
+                }
+            }
+
+            break;
+        default: error = EOPNOTSUPP; break;
         }
 
         if (unlikely(error)) {
@@ -1335,11 +1380,13 @@ ssize_t vfs_write(file_t *file, const void *buffer, ssize_t size) {
 
 ssize_t vfs_pread(file_t *file, void *buffer, ssize_t size, off_t offset) {
     if (unlikely(!file->ops)) return -EBADF;
+    if (unlikely(!file->ops->seek)) return -ESPIPE;
     return do_rw_op(file, buffer, size, R_OK, file->ops->read, offset, false);
 }
 
 ssize_t vfs_pwrite(file_t *file, const void *buffer, ssize_t size, off_t offset) {
     if (unlikely(!file->ops)) return -EBADF;
+    if (unlikely(!file->ops->seek)) return -ESPIPE;
     return do_rw_op(file, (void *)buffer, size, W_OK, file->ops->write, offset, false);
 }
 

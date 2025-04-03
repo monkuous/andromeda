@@ -72,18 +72,15 @@ static void console_read_cont(void *ptr) {
 
     if (current->wake_reason == WAKE_INTERRUPT) {
         set_syscall_result(-EINTR);
-        return;
-    }
-
-    if (!line_len) {
+    } else if (!line_len) {
         sched_block(console_read_cont, op, true);
         return;
+    } else {
+        int error = do_read(op->buf, &op->count);
+
+        if (likely(!error)) set_syscall_result(op->count);
+        else set_syscall_result(-error);
     }
-
-    int error = do_read(op->buf, &op->count);
-
-    if (likely(!error)) set_syscall_result(op->count);
-    else set_syscall_result(-error);
 
     list_remove(&line_waiting, &op->node);
     vmfree(op, sizeof(*op));

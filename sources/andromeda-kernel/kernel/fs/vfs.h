@@ -129,6 +129,26 @@ typedef struct {
     } symlink;
 } inode_ops_t;
 
+typedef struct {
+    list_node_t node;
+    thread_t *thread;
+    file_t *file;
+    int fd_flags;
+} fifo_open_wait_ctx_t;
+
+typedef struct {
+    void *buffer;
+    size_t read_index;
+    size_t write_index;
+    size_t num_readers;
+    size_t num_writers;
+    list_t read_waiting;
+    list_t write_waiting;
+    list_t open_read_waiting;
+    list_t open_write_waiting;
+    bool has_data;
+} fifo_state_t;
+
 struct inode {
     const inode_ops_t *ops;
     size_t references;
@@ -151,8 +171,11 @@ struct inode {
         dev_t device;
         const file_ops_t *directory;
         void *symlink;
+        fifo_state_t fifo;
     };
 };
+
+extern const file_ops_t fifo_ops;
 
 void dentry_ref(dentry_t *entry);
 void dentry_deref(dentry_t *entry);

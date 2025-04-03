@@ -1,5 +1,6 @@
 #include "fs.h"
 #include "compiler.h"
+#include "fs/fifo.h"
 #include "fs/vfs.h"
 #include "mem/usermem.h"
 #include "mem/vmalloc.h"
@@ -8,6 +9,7 @@
 #include "proc/signal.h"
 #include "string.h"
 #include "sys/syscall.h"
+#include "util/list.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -51,6 +53,32 @@ int sys_OPEN(int dirfd, uintptr_t path, size_t length, int flags, mode_t mode) {
         fd_free(ret);
         ret = error;
         goto exit2;
+    }
+
+    if (!(flags & O_NONBLOCK) && S_ISFIFO(file->inode->mode)) {
+        if ((flags & O_ACCMODE) == O_RDONLY && file->inode->fifo.num_writers == 0) {
+            fifo_open_wait_ctx_t *ctx = vmalloc(sizeof(*ctx));
+            ctx->thread = current;
+            ctx->file = file;
+            ctx->fd_flags = get_fd_flags(flags);
+            list_insert_tail(&file->inode->fifo.open_read_waiting, &ctx->node);
+            fd_free(ret);
+            sched_block(fifo_open_read_cont, ctx, true);
+            ret = -EAGAIN;
+            goto exit2;
+        }
+
+        if ((flags & O_ACCMODE) == O_WRONLY && file->inode->fifo.num_readers == 0) {
+            fifo_open_wait_ctx_t *ctx = vmalloc(sizeof(*ctx));
+            ctx->thread = current;
+            ctx->file = file;
+            ctx->fd_flags = get_fd_flags(flags);
+            list_insert_tail(&file->inode->fifo.open_write_waiting, &ctx->node);
+            fd_free(ret);
+            sched_block(fifo_open_write_cont, ctx, true);
+            ret = -EAGAIN;
+            goto exit2;
+        }
     }
 
     fd_assoc(ret, file, get_fd_flags(flags));
@@ -544,4 +572,44 @@ ssize_t sys_READLINK(int dirfd, uintptr_t path, size_t length, uintptr_t buffer,
 error:
     vmfree(buf, length);
     return error;
+}
+
+int64_t sys_PIPE(int flags) {
+    if (unlikely(flags & ~(O_CLOEXEC | O_NONBLOCK))) return -EINVAL;
+
+    int rfd = fd_alloc();
+    if (unlikely(rfd < 0)) return rfd;
+
+    int wfd = fd_alloc();
+    if (unlikely(wfd < 0)) {
+        fd_free(rfd);
+        return wfd;
+    }
+
+    inode_t *inode = create_anonymous_inode(S_IFIFO | 0600, 0);
+    file_t *rfile, *wfile;
+
+    int error = -open_inode(&rfile, nullptr, inode, flags | O_RDONLY);
+    if (unlikely(error)) {
+        inode_deref(inode);
+        fd_free(wfd);
+        fd_free(rfd);
+        return error;
+    }
+
+    error = -open_inode(&wfile, nullptr, inode, flags | O_WRONLY);
+    inode_deref(inode);
+    if (unlikely(error)) {
+        file_deref(rfile);
+        fd_free(wfd);
+        fd_free(rfd);
+        return error;
+    }
+
+    fd_assoc(rfd, rfile, get_fd_flags(flags));
+    fd_assoc(wfd, wfile, get_fd_flags(flags));
+    file_deref(rfile);
+    file_deref(wfile);
+
+    return ((int64_t)rfd << 32) | wfd;
 }

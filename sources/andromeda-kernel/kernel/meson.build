@@ -21,6 +21,7 @@ kernel_elf = executable(
     'drv/loopback.c',
     'fs/detect.c',
     'fs/fat.c',
+    'fs/fifo.c',
     'fs/iso9660.c',
     'fs/pgcache.c',
     'fs/ramfs.c',
