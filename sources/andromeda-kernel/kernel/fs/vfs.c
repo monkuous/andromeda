@@ -114,7 +114,7 @@ void file_ref(file_t *file) {
 
 void file_deref(file_t *file) {
     if (--file->references == 0) {
-        if (file->ops->free) file->ops->free(file);
+        if (file->ops && file->ops->free) file->ops->free(file);
 
         inode_deref(file->inode);
         if (file->path) dentry_deref(file->path);
