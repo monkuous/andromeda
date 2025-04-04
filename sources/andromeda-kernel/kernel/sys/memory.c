@@ -149,6 +149,9 @@ static void futex_cont(void *ptr) {
         else futexes[bucket] = addr->next;
 
         if (addr->next) addr->next->prev = addr->prev;
+
+        if (addr->location.inode) inode_deref(addr->location.inode);
+        vmfree(addr, sizeof(*addr));
     }
 
     vmfree(waiter, sizeof(*waiter));

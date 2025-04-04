@@ -35,14 +35,6 @@ static void handle_switch(thread_t *prev) {
     }
 
     if (prev->state == THREAD_EXITED) {
-        if (--prev->vm->references == 0) {
-            clean_cur_pmap();
-            switch_pmap(&current->vm->pmap);
-            vm_free(prev->vm);
-        } else if (prev->vm != current->vm) {
-            switch_pmap(&current->vm->pmap);
-        }
-
         do_thread_free(prev);
     } else if (prev->vm != current->vm) {
         switch_pmap(&current->vm->pmap);
