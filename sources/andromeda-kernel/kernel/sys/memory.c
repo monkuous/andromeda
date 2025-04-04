@@ -152,6 +152,8 @@ static void futex_cont(void *ptr) {
 
         if (addr->location.inode) inode_deref(addr->location.inode);
         vmfree(addr, sizeof(*addr));
+
+        futex_cnt -= 1;
     }
 
     vmfree(waiter, sizeof(*waiter));
