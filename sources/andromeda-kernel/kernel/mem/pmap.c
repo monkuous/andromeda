@@ -31,6 +31,7 @@
 #define TABLE_FLAGS (PTE_ACCESSED | PTE_USER | PTE_WRITABLE | PTE_PRESENT)
 
 #define CUR_PAGE_DIR ((uint32_t *)(PTBL_VIRT_BASE | (PTBL_VIRT_BASE >> 10)))
+#define KERN_PD_IDX ((KERN_VIRT_BASE >> 22) & 1023)
 
 extern uint32_t kernel_page_dir[1024];
 static uint32_t kernel_pd_phys;
@@ -52,9 +53,13 @@ void init_pmap() {
 
 void create_pmap(pmap_t *pmap) {
     pmap->page_dir_phys = page_to_phys(pmem_alloc(false));
+
+    size_t user_size = KERN_PD_IDX * 4;
+    size_t kern_size = PAGE_SIZE - user_size;
+
     uint32_t *map = pmap_tmpmap(pmap->page_dir_phys);
-    memset(map, 0, PAGE_SIZE / 2);
-    memcpy(&map[512], &kernel_page_dir[512], PAGE_SIZE / 2);
+    memset(map, 0, user_size);
+    memcpy(&map[KERN_PD_IDX], &kernel_page_dir[KERN_PD_IDX], kern_size);
     map[(PTBL_VIRT_BASE >> 22) & 1023] = pmap->page_dir_phys | (TABLE_FLAGS & ~PTE_USER);
 }
 
@@ -74,7 +79,7 @@ static void handle_unmap(uint32_t pte) {
 
 void clean_cur_pmap() {
     uint32_t *pd = CUR_PAGE_DIR;
-    uint32_t *kpd = &pd[512];
+    uint32_t *kpd = &pd[KERN_PD_IDX];
     uint32_t *pt = (uint32_t *)PTBL_VIRT_BASE;
 
     while (pd < kpd) {
@@ -180,7 +185,7 @@ static void create_mapping(idt_frame_t *frame, vm_region_t *region, uintptr_t ad
     } else {
         page_t *page = pmem_alloc(false);
         page->anon.references = 1;
-        pte |= page_to_phys(page);
+        pte |= page_to_phys(page) | PTE_ANON;
         if (region->prot & PROT_WRITE) pte |= PTE_WRITABLE;
 
         *ptep = pte;
@@ -384,6 +389,7 @@ void pmap_clone(pmap_t *out, uintptr_t virt, size_t size, bool cow) {
 
             while (pti <= pti_end) {
                 uint32_t pte = *table;
+                ASSERT(!*otbl);
 
                 if (pte) {
                     if (cow) {
@@ -399,7 +405,7 @@ void pmap_clone(pmap_t *out, uintptr_t virt, size_t size, bool cow) {
                     }
 
                     if (pte & PTE_ANON) {
-                        phys_to_page(pte)->anon.references += 1;
+                        phys_to_page(pte & PTE_ADDR)->anon.references += 1;
                     }
                 }
 
