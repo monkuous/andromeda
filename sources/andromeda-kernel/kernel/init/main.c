@@ -37,6 +37,11 @@ static void init_video() {
     }
 }
 
+static void mkdir_or_die(const char *path) {
+    int error = vfs_mknod(nullptr, path, strlen(path), S_IFDIR | 0755, 0);
+    if (unlikely(error)) panic("failed to create %s (%d)", path, error);
+}
+
 // Mounts a ramfs on /, sets up cwd and umask, and creates some of the basic folder structure
 static void init_vfs() {
     hostname_len = 9;
@@ -54,17 +59,14 @@ static void init_vfs() {
     if (unlikely(error)) panic("failed to set working directory (%d)", error);
     file_deref(root);
 
-    error = vfs_mknod(nullptr, "boot", 4, S_IFDIR | 0755, 0);
-    if (unlikely(error)) panic("failed to create /boot (%d)", error);
-
-    error = vfs_mknod(nullptr, "dev", 3, S_IFDIR | 0755, 0);
-    if (unlikely(error)) panic("failed to create /dev (%d)", error);
+    mkdir_or_die("/boot");
+    mkdir_or_die("/dev");
+    mkdir_or_die("/realroot");
 
     error = vfs_mount(nullptr, "dev", 3, ramfs_create, &ramfs_ctx);
     if (unlikely(error)) panic("failed to mount /dev (%d)", error);
 
-    error = vfs_mknod(nullptr, "realroot", 8, S_IFDIR | 0755, 0);
-    if (unlikely(error)) panic("failed to create /realroot (%d)", error);
+    mkdir_or_die("/dev/volumes");
 }
 
 static dev_t get_boot_volume() {

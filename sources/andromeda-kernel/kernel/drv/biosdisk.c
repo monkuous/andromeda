@@ -1,6 +1,7 @@
 #include "biosdisk.h"
 #include "compiler.h"
 #include "drv/device.h"
+#include "drv/partition.h"
 #include "fs/vfs.h"
 #include "init/bios.h"
 #include "mem/layout.h"
@@ -75,32 +76,7 @@ static int do_read(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
     return 0;
 }
 
-static int biosdisk_rvirt(bdev_t *ptr, void *buffer, uint64_t block, size_t count) {
-    if (!count) return 0;
-
-    uint64_t tail = block + (count - 1);
-    if (tail < block || tail >= ptr->blocks) return ENXIO;
-
-    size_t page_blocks = PAGE_SIZE >> ptr->block_shift;
-
-    while (count) {
-        size_t cur_blocks = page_blocks < count ? page_blocks : count;
-        size_t cur_bytes = cur_blocks << ptr->block_shift;
-
-        int error = do_read(ptr, biosdisk_bounce.phys, block, cur_blocks);
-        if (unlikely(error)) return error;
-
-        memcpy(buffer, biosdisk_bounce.virt, cur_bytes);
-
-        buffer += cur_bytes;
-        block += cur_blocks;
-        count -= cur_blocks;
-    }
-
-    return 0;
-}
-
-static int biosdisk_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
+static int biosdisk_read(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
     if (!count) return 0;
 
     uint64_t tail = block + (count - 1);
@@ -152,8 +128,7 @@ static int biosdisk_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t cou
 }
 
 static const bdev_ops_t bios_bdev_ops = {
-        .rvirt = biosdisk_rvirt,
-        .rphys = biosdisk_rphys,
+        .read = biosdisk_read,
 };
 
 static bios_bdev_t *bios_drives;
@@ -180,7 +155,64 @@ static size_t create_drive() {
     return bios_drive_count++;
 }
 
+static bios_bdev_t *create_bdev(uint8_t id, uint64_t offset, uint64_t blocks, int block_shift) {
+    size_t minor = create_drive();
+    bios_bdev_t *bdev = &bios_drives[minor];
+    memset(bdev, 0, sizeof(*bdev));
+
+    bdev->base.ops = &bios_bdev_ops;
+    bdev->base.blocks = blocks;
+    bdev->base.block_shift = block_shift;
+    bdev->base.id = DEVICE_ID(DRIVER_BIOSDISK, minor);
+    bdev->drive = id;
+    bdev->lba0 = offset;
+
+    init_bdev_pgcache(&bdev->base);
+    return bdev;
+}
+
+struct bios_part_discover_ctx {
+    bios_bdev_t *bdev;
+    uint64_t boot_lba;
+    const void *path;
+    size_t path_length;
+    size_t partitions;
+};
+
+static void bios_part_discover_cb(uint64_t lba, uint64_t size, const void *id, size_t id_len, void *ptr) {
+    struct bios_part_discover_ctx *ctx = ptr;
+    bios_bdev_t *bdev = create_bdev(ctx->bdev->drive, ctx->bdev->lba0 + lba, size, ctx->bdev->base.block_shift);
+
+    unsigned char path[32];
+    size_t path_length = snprintk(path, sizeof(path), "%Sp%u", ctx->path, ctx->path_length, ctx->partitions++);
+    ASSERT(path_length <= sizeof(path));
+
+    unsigned char *name = &path[5];
+    size_t name_length = path_length - 5;
+
+    int error = vfs_mknod(nullptr, path, path_length, S_IFBLK | 0400, bdev->base.id);
+    if (unlikely(error)) panic("biosdisk: mknod failed (%d)", error);
+
+    char *link_path;
+    size_t link_len = asprintk(&link_path, "/dev/volumes/%S", id, id_len);
+
+    unsigned char target[32];
+    size_t target_length = snprintk(target, sizeof(target), "../%S", name, name_length);
+    ASSERT(target_length <= sizeof(target));
+
+    error = vfs_symlink(nullptr, link_path, link_len, target, target_length);
+    vmfree(link_path, link_len);
+    if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
+
+    if (ctx->boot_lba != UINT64_MAX && ctx->boot_lba != 0 && ctx->boot_lba == lba) {
+        error = vfs_symlink(nullptr, "/dev/bootvol", 12, name, name_length);
+        if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
+    }
+}
+
 static bool process_drive(uint8_t id, uint64_t boot_lba) {
+    static size_t disks;
+
     bios_params_t params;
     params.params_size = sizeof(params);
 
@@ -192,38 +224,32 @@ static bool process_drive(uint8_t id, uint64_t boot_lba) {
     if (params.block_size & (params.block_size - 1)) return false;
     if (params.block_size > PAGE_SIZE) return false;
 
-    size_t minor = create_drive();
-    bios_bdev_t *bdev = &bios_drives[minor];
-    memset(bdev, 0, sizeof(*bdev));
+    int block_shift = __builtin_ctz(params.block_size);
+    bios_bdev_t *bdev = create_bdev(id, 0, params.blocks, block_shift);
 
-    bdev->base.ops = &bios_bdev_ops;
-    bdev->base.blocks = params.blocks;
-    bdev->base.block_shift = __builtin_ctz(params.block_size);
-    bdev->base.id = DEVICE_ID(DRIVER_BIOSDISK, minor);
-    bdev->drive = id;
-
-    unsigned char path_buffer[32];
-    size_t path_length = snprintk(path_buffer, sizeof(path_buffer), "/dev/disk%u", minor);
+    unsigned char path[32];
+    size_t path_length = snprintk(path, sizeof(path), "/dev/disk%u", disks++);
+    ASSERT(path_length <= sizeof(path));
 
     // remove the /dev/ prefix when relative is necessary
-    unsigned char *name_buffer = &path_buffer[5];
+    unsigned char *name = &path[5];
     size_t name_length = path_length - 5;
 
-    int error = vfs_mknod(nullptr, path_buffer, path_length, S_IFBLK | 0400, bdev->base.id);
+    int error = vfs_mknod(nullptr, path, path_length, S_IFBLK | 0400, bdev->base.id);
     if (unlikely(error)) panic("biosdisk: mknod failed (%d)", error);
 
     if (boot_lba != UINT64_MAX) {
-        error = vfs_symlink(nullptr, "/dev/bootdisk", 13, name_buffer, name_length);
+        error = vfs_symlink(nullptr, "/dev/bootdisk", 13, name, name_length);
         if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
 
         if (boot_lba == 0) {
-            error = vfs_symlink(nullptr, "/dev/bootvol", 12, name_buffer, name_length);
+            error = vfs_symlink(nullptr, "/dev/bootvol", 12, name, name_length);
             if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
         }
     }
 
-    // TODO: Partitions
-
+    struct bios_part_discover_ctx ctx = {bdev, boot_lba, path, path_length, 0};
+    discover_partitions(&bdev->base, name, name_length, bios_part_discover_cb, &ctx);
     return true;
 }
 

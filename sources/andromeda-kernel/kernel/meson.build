@@ -19,6 +19,7 @@ kernel_elf = executable(
     'drv/device.c',
     'drv/idle.c',
     'drv/loopback.c',
+    'drv/partition.c',
     'fs/detect.c',
     'fs/fat.c',
     'fs/fifo.c',

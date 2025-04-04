@@ -24,7 +24,7 @@ static const inode_ops_t fat_inode_ops;
 typedef struct {
     fs_t base;
     bdev_t *device;
-    flat_pgcache_t fat;
+    uint64_t fat_offset;
     uint64_t root_block;
     uint64_t root_size;
     int fat_entry_size; // 1 means 12 bits
@@ -77,7 +77,7 @@ static int next_cluster(fatfs_t *fs, uint32_t *cluster) {
     uint32_t prev = *cluster;
 
     size_t size = fs->fat_entry_size;
-    uint64_t offset = prev * fs->fat_entry_size;
+    uint64_t offset = fs->fat_offset + prev * fs->fat_entry_size;
 
     if (fs->fat_entry_size == 1) {
         offset += prev >> 1;
@@ -85,7 +85,7 @@ static int next_cluster(fatfs_t *fs, uint32_t *cluster) {
     }
 
     uint32_t value = 0;
-    int error = pgcache_read(&fs->fat.base, &value, size, offset);
+    int error = pgcache_read(&fs->device->data, &value, size, offset);
     if (unlikely(error)) return error;
 
     if (fs->fat_entry_size == 1) {
@@ -129,7 +129,7 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
                 return 0;
             }
 
-            int error = fs->device->ops->rphys(
+            int error = fs->device->ops->read(
                     fs->device,
                     phys + inode->cur.offset,
                     fs->data_block + ((inode->cur.cluster - 2) << fs->cluster_block_shift),
@@ -157,7 +157,7 @@ static int fat_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx) {
                 avail = PAGE_SIZE;
             }
 
-            return fs->device->ops->rphys(
+            return fs->device->ops->read(
                     fs->device,
                     page_to_phys(page),
                     fs->root_block + (start >> fs->device->block_shift),
@@ -559,69 +559,45 @@ int fat_create(fs_t **out, void *ctx) {
 
     size_t block_size = 1ul << dev->block_shift;
     size_t block_mask = block_size - 1;
-    size_t bpb_size = (sizeof(bpb_t) + block_mask) & ~block_mask;
-    size_t bpb_count = bpb_size >> dev->block_shift;
 
-    bpb_t *bpb = vmalloc(bpb_size);
-    int error = dev->ops->rvirt(dev, bpb, 0, bpb_count);
-    if (unlikely(error)) goto exit;
+    bpb_t bpb;
+    int error = pgcache_read(&dev->data, &bpb, sizeof(bpb), 0);
+    if (unlikely(error)) return error;
 
-    if (bpb->signature != 0xaa55 || !bpb->sector_size || !bpb->cluster_size || !bpb->num_reserved || !bpb->num_fats ||
-        bpb->sector_size < block_size) {
-        error = EINVAL;
-        goto exit;
+    if (bpb.signature != 0xaa55 || !bpb.sector_size || !bpb.cluster_size || !bpb.num_reserved || !bpb.num_fats ||
+        bpb.sector_size < block_size) {
+        return EINVAL;
     }
 
-    uint32_t cluster_size = (uint32_t)bpb->sector_size * bpb->cluster_size;
-    if ((cluster_size & (cluster_size - 1)) || cluster_size > PAGE_SIZE) {
-        error = EINVAL;
-        goto exit;
-    }
+    uint32_t cluster_size = (uint32_t)bpb.sector_size * bpb.cluster_size;
+    if ((cluster_size & (cluster_size - 1)) || cluster_size > PAGE_SIZE) return EINVAL;
 
-    uint32_t sectors = bpb->num_sectors_16 ? bpb->num_sectors_16 : bpb->num_sectors_32;
-    if (!sectors) {
-        error = EINVAL;
-        goto exit;
-    }
+    uint32_t sectors = bpb.num_sectors_16 ? bpb.num_sectors_16 : bpb.num_sectors_32;
+    if (!sectors) return EINVAL;
 
-    uint64_t blocks = ((uint64_t)sectors * bpb->sector_size - 1 + block_mask) >> dev->block_shift;
-    if (blocks > dev->blocks) {
-        error = EINVAL;
-        goto exit;
-    }
+    uint64_t blocks = ((uint64_t)sectors * bpb.sector_size - 1 + block_mask) >> dev->block_shift;
+    if (blocks > dev->blocks) return EINVAL;
 
-    bool is_fat32 = !bpb->fat_size_16;
-    uint32_t fat_size = is_fat32 ? bpb->fat32.fat_size : bpb->fat_size_16;
-    if (!fat_size) {
-        error = EINVAL;
-        goto exit;
-    }
+    bool is_fat32 = !bpb.fat_size_16;
+    uint32_t fat_size = is_fat32 ? bpb.fat32.fat_size : bpb.fat_size_16;
+    if (!fat_size) return EINVAL;
 
-    uint64_t fat_offset = bpb->num_reserved;
-    uint64_t root_offset = fat_offset + (uint64_t)bpb->num_fats * fat_size;
-    uint64_t root_size = ((uint32_t)bpb->root_size * 32 + (bpb->sector_size - 1)) / bpb->sector_size;
+    uint64_t fat_offset = bpb.num_reserved;
+    uint64_t root_offset = fat_offset + (uint64_t)bpb.num_fats * fat_size;
+    uint64_t root_size = ((uint32_t)bpb.root_size * 32 + (bpb.sector_size - 1)) / bpb.sector_size;
     uint64_t data_offset = root_offset + root_size;
 
-    if ((is_fat32 && root_size) || data_offset >= sectors) {
-        error = EINVAL;
-        goto exit;
-    }
+    if ((is_fat32 && root_size) || data_offset >= sectors) return EINVAL;
 
     uint32_t data_sectors = sectors - data_offset;
-    uint32_t data_clusters = data_sectors / bpb->cluster_size;
+    uint32_t data_clusters = data_sectors / bpb.cluster_size;
 
     if (is_fat32) {
-        if (root_size) {
-            error = EINVAL;
-            goto exit;
-        }
+        if (root_size) return EINVAL;
 
-        if (bpb->fat32.flags & 0x80) {
-            uint64_t idx = bpb->fat32.flags & 15;
-            if (idx >= bpb->num_fats) {
-                error = EINVAL;
-                goto exit;
-            }
+        if (bpb.fat32.flags & 0x80) {
+            uint64_t idx = bpb.fat32.flags & 15;
+            if (idx >= bpb.num_fats) return EINVAL;
 
             fat_offset += (uint64_t)idx * fat_size;
         }
@@ -637,10 +613,9 @@ int fat_create(fs_t **out, void *ctx) {
     fs->base.max_name_len = 8; // TODO: VFAT
     fs->base.blocks = data_clusters;
     fs->device = dev;
+    fs->fat_offset = fat_offset * bpb.sector_size;
     fs->cluster_block_shift = __builtin_ctz(cluster_size) - dev->block_shift;
-    fs->data_block = (data_offset * bpb->sector_size) >> dev->block_shift;
-
-    init_flat_pgcache(&fs->fat, dev, fat_offset * bpb->sector_size, fat_size * bpb->sector_size);
+    fs->data_block = (data_offset * bpb.sector_size) >> dev->block_shift;
 
     fat_dirent_t root_dirent = {
             .attr = DENT_DIRECTORY,
@@ -650,21 +625,20 @@ int fat_create(fs_t **out, void *ctx) {
     };
 
     if (!is_fat32) {
-        fs->root_block = (root_offset * bpb->sector_size) >> dev->block_shift;
-        fs->root_size = root_size * bpb->sector_size;
+        fs->root_block = (root_offset * bpb.sector_size) >> dev->block_shift;
+        fs->root_size = root_size * bpb.sector_size;
         fs->fat_entry_size = 1 + (data_clusters >= 4085);
     } else {
         fs->fat_entry_size = 4;
-        root_dirent.cluster_low = bpb->fat32.root_cluster;
-        root_dirent.cluster_high = bpb->fat32.root_cluster >> 16;
+        root_dirent.cluster_low = bpb.fat32.root_cluster;
+        root_dirent.cluster_high = bpb.fat32.root_cluster >> 16;
     }
 
     inode_t *root;
     error = create_inode(&root, fs, &root_dirent, 1);
     if (unlikely(error)) {
-        pgcache_resize(&fs->fat.base, 0);
         vmfree(fs, sizeof(*fs));
-        goto exit;
+        return error;
     }
 
     init_fs(&fs->base, root);
@@ -672,7 +646,5 @@ int fat_create(fs_t **out, void *ctx) {
 
     dev->fs = &fs->base;
     *out = &fs->base;
-exit:
-    vmfree(bpb, bpb_size);
     return error;
 }

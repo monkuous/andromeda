@@ -13,17 +13,6 @@
             "externalConsole": false,
             "MIMode": "gdb",
             "miDebuggerPath": "${workspaceFolder}/support/gdb.sh",
-            "setupCommands": [
-                {
-                    "text": "add-symbol-file ${workspaceFolder}/build/system-root/usr/lib/ld.so -o 0x1000"
-                },
-                {
-                    "text": "add-symbol-file ${workspaceFolder}/build/system-root/usr/lib/libc.so -o 0xb24000"
-                },
-                {
-                    "text": "add-symbol-file ${workspaceFolder}/build/system-root/usr/bin/ls"
-                }
-            ],
             "preLaunchTask": "Andromeda: rebuild active package",
             "debugServerPath": "${workspaceFolder}/support/qemu-debug.sh",
             "debugServerArgs": "${workspaceFolder}/build qemu-tcg",

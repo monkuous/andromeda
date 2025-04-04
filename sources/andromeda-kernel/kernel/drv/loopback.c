@@ -20,31 +20,7 @@ typedef struct {
     unsigned char *buffer;
 } loopback_bdev_t;
 
-static int loopback_rvirt(bdev_t *ptr, void *buffer, uint64_t block, size_t count) {
-    loopback_bdev_t *self = (loopback_bdev_t *)ptr;
-
-    uint64_t off = block << ptr->block_shift;
-    uint64_t rem = (uint64_t)count << ptr->block_shift;
-
-    while (rem > 0) {
-        ssize_t cur = rem < MAX_READ ? rem : MAX_READ;
-
-        ssize_t done = vfs_pread(self->file, buffer, cur, off);
-        if (unlikely(done < 0)) return -done;
-        if (done != cur) {
-            memset(buffer + done, 0, cur - done);
-            break;
-        }
-
-        buffer += cur;
-        off += cur;
-        rem -= cur;
-    }
-
-    return 0;
-}
-
-static int loopback_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
+static int loopback_read(bdev_t *ptr, uint32_t phys, uint64_t block, size_t count) {
     loopback_bdev_t *self = (loopback_bdev_t *)ptr;
 
     uint64_t off = block << ptr->block_shift;
@@ -79,8 +55,7 @@ static int loopback_rphys(bdev_t *ptr, uint32_t phys, uint64_t block, size_t cou
 }
 
 static const bdev_ops_t loopback_ops = {
-        .rvirt = loopback_rvirt,
-        .rphys = loopback_rphys,
+        .read = loopback_read,
 };
 
 static loopback_bdev_t **loopbacks;
@@ -120,6 +95,7 @@ int create_loopback(dev_t *out, file_t *file, size_t block_size) {
     device->file = file;
     device->buffer = vmalloc(BUF_SIZE);
     file_ref(file);
+    init_bdev_pgcache(&device->base);
 
     *out = id;
     return 0;

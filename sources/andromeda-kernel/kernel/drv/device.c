@@ -37,22 +37,16 @@ static int bdev_file_seek(file_t *self, uint64_t *offset, int whence) {
 static int bdev_file_read(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos) {
     bdev_t *bdev = self->priv;
 
-    int bshift = bdev->block_shift;
-    size_t block_size = 1ul << bshift;
-    size_t block_mask = block_size - 1;
-
-    if (offset & block_mask) return ENXIO;
-
     size_t remaining = *size;
-    uint64_t available = bdev->blocks << bshift;
+    uint64_t available = bdev->blocks << bdev->block_shift;
     if (available > offset) available -= offset;
     else available = 0;
     if (remaining > available) remaining = available;
 
-    if ((offset | remaining) & block_mask) return ENXIO;
-
-    int error = bdev->ops->rvirt(bdev, buffer, offset >> bshift, remaining >> bshift);
-    if (unlikely(error)) return error;
+    if (remaining) {
+        int error = pgcache_read(&bdev->data, buffer, remaining, offset);
+        if (unlikely(error)) return error;
+    }
 
     if (update_pos) self->position = offset + remaining;
     *size = remaining;
@@ -83,27 +77,23 @@ int open_cdev(dev_t device, file_t *file, int flags) {
     }
 }
 
-static int flat_pgcache_read_page(pgcache_t *ptr, page_t *page, uint64_t idx) {
-    flat_pgcache_t *self = (flat_pgcache_t *)ptr;
-    uint64_t block = self->block + (idx << (PAGE_SHIFT - self->device->block_shift));
-    size_t count = PAGE_SIZE >> self->device->block_shift;
+static int bdev_pgcache_read_page(pgcache_t *ptr, page_t *page, uint64_t idx) {
+    bdev_t *device = container(bdev_t, data, ptr);
 
-    return self->device->ops->rphys(self->device, page_to_phys(page), block, count);
+    uint64_t block = idx << (PAGE_SHIFT - device->block_shift);
+    uint64_t count = device->blocks - block;
+    size_t rqcount = PAGE_SIZE >> device->block_shift;
+    if (rqcount > count) rqcount = count;
+
+    return device->ops->read(device, page_to_phys(page), block, rqcount);
 }
 
-static const pgcache_ops_t flat_pgcache_ops = {
-    .read_page = flat_pgcache_read_page,
+static const pgcache_ops_t bdev_pgcache_ops = {
+    .read_page = bdev_pgcache_read_page,
 };
 
-void init_flat_pgcache(flat_pgcache_t *cache, bdev_t *dev, uint64_t offset, uint64_t size) {
-    ASSERT(size);
-    ASSERT(!(offset & ((1ul << dev->block_shift) - 1)));
-    ASSERT(((offset + (size - 1)) >> dev->block_shift) < dev->blocks);
+void init_bdev_pgcache(bdev_t *dev) {
     ASSERT(dev->block_shift <= PAGE_SHIFT);
-
-    cache->base.ops = &flat_pgcache_ops;
-    cache->device = dev;
-    cache->block = offset >> dev->block_shift;
-
-    pgcache_resize(&cache->base, size);
+    dev->data.ops = &bdev_pgcache_ops;
+    pgcache_resize(&dev->data, dev->blocks << dev->block_shift);
 }

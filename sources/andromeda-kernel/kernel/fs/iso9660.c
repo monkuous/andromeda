@@ -77,7 +77,7 @@ static int iso9660_pgcache_read_page(pgcache_t *self, page_t *page, uint64_t idx
         if (blocks > eblrem) blocks = eblrem;
 
         uint64_t lba = inode->cur.extent->block + eblock;
-        int error = fs->device->ops->rphys(fs->device, phys, lba << bdconvs, blocks << bdconvs);
+        int error = fs->device->ops->read(fs->device, phys, lba << bdconvs, blocks << bdconvs);
         if (unlikely(error)) return error;
 
         phys += blocks << fs->block_shift;
@@ -473,26 +473,22 @@ static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *o
         if (!ce_field) break;
 
         su_size = ce_field->ce.length.le;
+        cur_su = vmalloc(su_size);
 
-        size_t block_mask = (1ul << fs->device->block_shift) - 1;
-        size_t new_alloc_size = (ce_field->ce.offset.le + su_size + block_mask) & ~block_mask;
-        void *new_alloc_area = vmalloc(new_alloc_size);
-        cur_su = new_alloc_area + ce_field->ce.offset.le;
-
-        int error = fs->device->ops->rvirt(
-                fs->device,
-                new_alloc_area,
-                (uint64_t)ce_field->ce.location.le << (fs->block_shift - fs->device->block_shift),
-                new_alloc_size >> fs->device->block_shift
+        int error = pgcache_read(
+                &fs->device->data,
+                cur_su,
+                su_size,
+                (uint64_t)ce_field->ce.location.le << fs->block_shift
         );
         vmfree(alloc_area, alloc_size);
         if (unlikely(error)) {
-            vmfree(new_alloc_area, new_alloc_size);
+            vmfree(cur_su, su_size);
             return error;
         }
 
-        alloc_area = new_alloc_area;
-        alloc_size = new_alloc_size;
+        alloc_area = cur_su;
+        alloc_size = su_size;
     }
 
     vmfree(alloc_area, alloc_size);
@@ -778,6 +774,7 @@ static size_t get_name(void **out, full_dirent_t *entry, struct rr_info *rr_info
             if (c >= 'A' && c <= 'Z') entry->common.name[i] = c + ('a' - 'A');
         }
 
+        *out = entry->common.name;
         return len;
     }
 }
@@ -1043,11 +1040,8 @@ typedef struct [[gnu::packed, gnu::aligned(4)]] {
             dec_datetime_t effective_time;
             int8_t structure_version;
         } primary;
-        uint8_t padding[2041];
     };
 } voldesc_t;
-
-static_assert(sizeof(voldesc_t) == 2048, "wrong size for voldesc_t");
 
 #define VD_BOOT_RECORD 0
 #define VD_PRIMARY 1
@@ -1059,53 +1053,28 @@ int iso9660_create(fs_t **out, void *ctx) {
     bdev_t *dev = ctx;
 
     size_t block_size = 1ul << dev->block_shift;
-    size_t block_mask = block_size - 1;
-    if (block_size > 0x8000) return EINVAL;
 
-    uint64_t cur_dblk = 0x8000 >> dev->block_shift;
-    size_t descs_size = (sizeof(voldesc_t) + block_mask) & ~block_mask;
-    size_t descs_nblk = descs_size >> dev->block_shift;
-    void *descs = vmalloc(descs_size);
-    voldesc_t *primdesc = nullptr;
+    voldesc_t desc;
 
     int error = 0;
+    uint64_t desc_offset = 0x8000;
 
-    do {
-        if (cur_dblk + (descs_nblk - 1) >= dev->blocks) {
-            error = EINVAL;
-            goto exit;
-        }
+    for (;;) {
+        error = pgcache_read(&dev->data, &desc, sizeof(desc), desc_offset);
+        if (unlikely(error)) return error;
+        if (memcmp(desc.id, "CD001", 5)) return EINVAL;
 
-        error = dev->ops->rvirt(dev, descs, cur_dblk, descs_nblk);
-        if (unlikely(error)) goto exit;
+        if (desc.type == VD_TERMINATOR) return EINVAL;
+        if (desc.type == VD_PRIMARY) break;
 
-        for (size_t offset = 0; offset < descs_size; offset += sizeof(voldesc_t)) {
-            voldesc_t *desc = descs + offset;
+        desc_offset += 0x800;
+    }
 
-            if (memcmp(desc->id, "CD001", 5)) {
-                error = EINVAL;
-                goto exit;
-            }
-
-            if (desc->type == VD_TERMINATOR) {
-                // Descriptor list does not contain VD_PRIMARY
-                error = EINVAL;
-                goto exit;
-            }
-
-            if (desc->type == VD_PRIMARY) {
-                primdesc = desc;
-                break;
-            }
-        }
-    } while (!primdesc);
-
-    if (primdesc->version != 1 || primdesc->primary.structure_version != 1 ||
-        (primdesc->primary.block_size.le & (primdesc->primary.block_size.le - 1)) ||
-        primdesc->primary.block_size.le < block_size || primdesc->primary.block_size.le > PAGE_SIZE ||
-        primdesc->primary.num_disks.le != 1 || (primdesc->primary.root_dirent.flags & DENT_MID_EXTENT)) {
-        error = EINVAL;
-        goto exit;
+    if (desc.version != 1 || desc.primary.structure_version != 1 ||
+        (desc.primary.block_size.le & (desc.primary.block_size.le - 1)) || desc.primary.block_size.le < block_size ||
+        desc.primary.block_size.le > PAGE_SIZE || desc.primary.num_disks.le != 1 ||
+        (desc.primary.root_dirent.flags & DENT_MID_EXTENT)) {
+        return EINVAL;
     }
 
     iso9660_fs_t *fs = vmalloc(sizeof(*fs));
@@ -1114,32 +1083,32 @@ int iso9660_create(fs_t **out, void *ctx) {
     fs->base.ops = &iso9660_fs_ops;
     fs->base.device = dev->id;
     fs->base.flags = ST_RDONLY;
-    fs->base.block_size = primdesc->primary.block_size.le;
+    fs->base.block_size = desc.primary.block_size.le;
     fs->base.max_name_len = 255;
-    fs->base.blocks = primdesc->primary.num_blocks.le;
+    fs->base.blocks = desc.primary.num_blocks.le;
     fs->device = dev;
     fs->block_shift = __builtin_ctz(fs->base.block_size);
     fs->rr_skip = 0xff;
 
     extent_t *extents = vmalloc(sizeof(*extents));
-    make_extent(fs, extents, &primdesc->primary.root_dirent);
+    make_extent(fs, extents, &desc.primary.root_dirent);
 
     struct rr_info rr_info = {};
     inode_t *root;
     error = create_inode(
             &root,
             fs,
-            &primdesc->primary.root_dirent,
+            &desc.primary.root_dirent,
             INO_BASE,
             extents,
             1,
-            primdesc->primary.root_dirent.extent_len.le,
+            desc.primary.root_dirent.extent_len.le,
             &rr_info
     );
     rr_cleanup(&rr_info);
     if (unlikely(error)) {
         vmfree(fs, sizeof(*fs));
-        goto exit;
+        return error;
     }
 
     init_fs(&fs->base, root);
@@ -1147,7 +1116,5 @@ int iso9660_create(fs_t **out, void *ctx) {
 
     dev->fs = &fs->base;
     *out = &fs->base;
-exit:
-    vmfree(descs, descs_size);
     return error;
 }

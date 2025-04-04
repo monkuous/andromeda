@@ -1,6 +1,6 @@
 script = files('bcode.lds')[0]
 
-foreach type : ['fat32']
+foreach type : ['fat32', 'mbr']
     elf = executable(
         type + '.elf',
         type + '.S',

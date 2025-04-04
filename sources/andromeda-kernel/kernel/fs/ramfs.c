@@ -172,7 +172,7 @@ static int ramfs_inode_dir_create(inode_t *self, dentry_t *entry, mode_t mode, d
 
     if (S_ISDIR(mode)) {
         self->nlink += 1;
-        self->directory = &ramfs_dir_ops;
+        inode->directory = &ramfs_dir_ops;
     }
 
     dentry_ref(entry); // keep it around
