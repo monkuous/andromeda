@@ -1,4 +1,4 @@
-From a0aa8198f61bdd55a37c25a7631042115c7efeca Mon Sep 17 00:00:00 2001
+From 7057d8a0a3201a0089140d6f68475215473a9eb5 Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
@@ -17,7 +17,7 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/crt/crtn.S                  |  12 +
  sysdeps/andromeda/crt/meson.build             |  13 +
  sysdeps/andromeda/generic/entry.cpp           |  17 +
- sysdeps/andromeda/generic/generic.cpp         | 573 ++++++++++++++++++
+ sysdeps/andromeda/generic/generic.cpp         | 574 ++++++++++++++++++
  sysdeps/andromeda/generic/meson.build         |   2 +
  sysdeps/andromeda/generic/mntent.cpp          | 164 +++++
  sysdeps/andromeda/generic/mount.cpp           |  36 ++
@@ -80,7 +80,7 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/mntent.h            |  43 ++
  sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 76 files changed, 1887 insertions(+), 10 deletions(-)
+ 76 files changed, 1888 insertions(+), 10 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -460,18 +460,17 @@ index 00000000..6e28747f
 +}
 diff --git a/sysdeps/andromeda/generic/generic.cpp b/sysdeps/andromeda/generic/generic.cpp
 new file mode 100644
-index 00000000..be527652
+index 00000000..e236eebc
 --- /dev/null
 +++ b/sysdeps/andromeda/generic/generic.cpp
-@@ -0,0 +1,573 @@
+@@ -0,0 +1,574 @@
 +#include "syscall.h"
 +#include <andromeda/ioctl.h>
 +#include <andromeda/string.h>
 +#include <andromeda/syscall.h>
 +#include <errno.h>
-+#include <frg/vector.hpp>
++#include <limits.h>
 +#include <mlibc/all-sysdeps.hpp>
-+#include <mlibc/allocator.hpp>
 +#include <mlibc/arch-defs.hpp>
 +#include <stdlib.h>
 +#include <string.h>
@@ -726,10 +725,12 @@ index 00000000..be527652
 +		nenvp++;
 +	}
 +
-+	frg::vector<andromeda_tagged_string_t, MemoryAllocator> arg{getAllocator()};
-+	frg::vector<andromeda_tagged_string_t, MemoryAllocator> env{getAllocator()};
-+	arg.resize(nargv);
-+	env.resize(nenvp);
++	auto *arg = reinterpret_cast<andromeda_tagged_string_t *>(
++	    __builtin_alloca(nargv * sizeof(andromeda_tagged_string_t))
++	);
++	auto *env = reinterpret_cast<andromeda_tagged_string_t *>(
++	    __builtin_alloca(nenvp * sizeof(andromeda_tagged_string_t))
++	);
 +
 +	for (size_t i = 0; i < nargv; i++) {
 +		arg[i].data = argv[i];
@@ -741,7 +742,7 @@ index 00000000..be527652
 +		env[i].length = strlen(envp[i]);
 +	}
 +
-+	SYSCALL(5, SYS_EXEC, fd, arg.data(), nargv, env.data(), nenvp);
++	SYSCALL(5, SYS_EXEC, fd, arg, nargv, env, nenvp);
 +	return 0;
 +}
 +
