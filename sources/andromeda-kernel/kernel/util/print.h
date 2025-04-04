@@ -3,6 +3,8 @@
 #include <stdarg.h>
 #include <stddef.h>
 
+void print_set_console(bool console);
+
 void vprintk(const char *format, va_list args);
 void printk(const char *format, ...);
 

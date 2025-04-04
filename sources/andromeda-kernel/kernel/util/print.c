@@ -127,12 +127,18 @@ static size_t do_printk(printk_sink_t sink, void *ctx, const char *format, va_li
     return total;
 }
 
+static bool print_to_console = true;
+
+void print_set_console(bool console) {
+    print_to_console = console;
+}
+
 static void term_sink(const void *buf, size_t size, void *) {
 #if ANDROMEDA_QEMU_DEBUGCON
     asm("rep outsb" :: "d" (0xe9), "S" (buf), "c" (size));
 #endif
 
-    console_write(buf, size);
+    if (print_to_console) console_write(buf, size);
 }
 
 void vprintk(const char *format, va_list args) {

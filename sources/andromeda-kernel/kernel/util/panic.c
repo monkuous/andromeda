@@ -15,6 +15,8 @@
         intcall(0x16, &regs);
     }
 
+    print_set_console(true);
+
     va_list args;
     va_start(args, format);
     printk("\nkernel panic: ");

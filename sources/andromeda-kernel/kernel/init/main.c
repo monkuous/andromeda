@@ -143,6 +143,7 @@ static void chroot_to_initrd() {
     int error = vfs_open(&file, nullptr, init_name.data, init_name.length, O_RDONLY, 0);
     if (unlikely(error)) panic("failed to open %S (%d)", init_name.data, init_name.length, error);
 
+    print_set_console(false);
     error = execute(file, &init_name, 1, environment, sizeof(environment) / sizeof(*environment), false);
     file_deref(file);
     if (unlikely(error)) panic("failed to start init process (%d)", error);
