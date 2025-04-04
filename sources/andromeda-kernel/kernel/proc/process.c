@@ -75,6 +75,8 @@ static void pid_register(procent_t *ent) {
     ent->next = procs[bucket];
     if (ent->next) ent->next->prev = ent;
     procs[bucket] = ent;
+
+    proc_count += 1;
 }
 
 static void maybe_free_procent(procent_t *ent) {
