@@ -27,6 +27,7 @@ typedef struct thread {
     thread_state_t state;
     idt_frame_t regs;
     uintptr_t tdata;
+    unsigned char fpu[128];
     struct {
         thread_cont_t func;
         void *ctx;

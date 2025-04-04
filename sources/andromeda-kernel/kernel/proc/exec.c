@@ -513,6 +513,7 @@ static void setup_regs(idt_frame_t *frame, struct vm_data *vm_data) {
     frame->fs = GDT_SEL_UDATA;
     frame->gs = GDT_SEL_TDATA;
     frame->ss = GDT_SEL_UDATA;
+    asm("finit");
 
     current->sigstack = (stack_t){.ss_flags = SS_DISABLE};
 }

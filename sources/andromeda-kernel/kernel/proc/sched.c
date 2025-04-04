@@ -30,14 +30,21 @@ static void do_thread_free(thread_t *thread) {
 }
 
 static void handle_switch(thread_t *prev) {
+    if (prev == current) return;
+
     if (prev->tdata != current->tdata) {
         gdt_refresh_tdata();
     }
 
     if (prev->state == THREAD_EXITED) {
         do_thread_free(prev);
-    } else if (prev->vm != current->vm) {
-        switch_pmap(&current->vm->pmap);
+    } else {
+        if (prev->vm != current->vm) {
+            switch_pmap(&current->vm->pmap);
+        }
+
+        asm volatile("fsave %0" : "+m"(prev->fpu));
+        asm volatile("frstor %0" ::"m"(current->fpu));
     }
 }
 

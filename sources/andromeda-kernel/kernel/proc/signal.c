@@ -156,9 +156,13 @@ retry:
         ctx.rest.context.uc_mcontext.gregs[REG_UESP] = regs->esp;
         ctx.rest.context.uc_mcontext.gregs[REG_SS] = regs->ss;
 
+        asm volatile("fsave %0" : "+m"(ctx.rest.context.uc_mcontext.fpregs));
+
         memcpy(&ctx.rest.info, &sig->info, sizeof(sig->info));
 
         if (unlikely(user_memcpy((void *)ctx_addr, &ctx, sizeof(ctx)))) {
+            // fsave reset the registers to their initial values, restore them again
+            asm("frstor %0" ::"m"(ctx.rest.context.uc_mcontext.fpregs));
             if (i == SIGSEGV || i == SIGBUS) force_default = true;
             goto retry;
         }
@@ -178,6 +182,8 @@ retry:
             action->sa_handler = nullptr;
             action->sa_flags &= ~SA_SIGINFO;
         }
+
+        asm("fwait");
     }
 
     target->signals[i] = nullptr;
@@ -257,6 +263,8 @@ int return_from_signal() {
     regs->esp = ctx.context.uc_mcontext.gregs[REG_UESP];
     regs->ss = ctx.context.uc_mcontext.gregs[REG_SS];
     regs->vector = 0;
+
+    asm("frstor %0" ::"m"(ctx.context.uc_mcontext.fpregs));
 
     if (ctx.on_sigstack) {
         current->sigstack.ss_flags &= ~SS_ONSTACK;
