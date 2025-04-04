@@ -154,11 +154,11 @@ static uint32_t do_cow(uint32_t pte, uintptr_t addr) {
 static void create_mapping(idt_frame_t *frame, vm_region_t *region, uintptr_t addr, uint32_t *ptep, bool write) {
     uint32_t pte = PTE_DIRTY | PTE_ACCESSED | PTE_USER | PTE_PRESENT;
 
-    if (region->src.inode) {
+    if (region->src) {
         uint64_t offset = region->offset + (addr - region->head);
 
         page_t *page;
-        int error = pgcache_get_page(&region->src.inode->data, &page, offset >> PAGE_SHIFT, true);
+        int error = pgcache_get_page(&region->src->inode->data, &page, offset >> PAGE_SHIFT, true);
         if (unlikely(error)) {
             sendsig(SIGBUS, error, addr);
             if (!(frame->cs & 3)) usermem_ret(frame, EINTR);

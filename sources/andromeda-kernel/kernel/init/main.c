@@ -73,6 +73,7 @@ static void init_vfs() {
 
     mkdir_or_die("/dev/volumes");
     mkchr_or_die("/dev/null", 0666, DEVICE_ID(DRIVER_SPECIAL, DRIVER_SPECIAL_NULL));
+    mkchr_or_die("/dev/mem", 0600, DEVICE_ID(DRIVER_SPECIAL, DRIVER_SPECIAL_MEM));
 }
 
 static dev_t get_boot_volume() {

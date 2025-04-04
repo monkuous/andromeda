@@ -135,8 +135,9 @@ static bios_bdev_t **bios_drives;
 static size_t bios_drive_count;
 
 static void alloc_bounce_buf() {
-    page_t *page = pmem_alloc_slow(1, 0xfffff);
-    if (unlikely(!page)) panic("biosdisk: failed to allocate bounce buffer");
+    page_t *page;
+    int error = pmem_alloc_slow(&page, 1, PAGE_SIZE, 0xfffff);
+    if (unlikely(error)) panic("biosdisk: failed to allocate bounce buffer (%d)", error);
 
     biosdisk_bounce.phys = page_to_phys(page);
 

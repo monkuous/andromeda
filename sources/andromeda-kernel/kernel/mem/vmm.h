@@ -19,10 +19,7 @@ struct vm_region {
     int balance;
     int flags : 28;
     int prot : 4;
-    struct {
-        inode_t *inode;
-        int avail_prot;
-    } src;
+    file_t *src;
     list_node_t snode;
     size_t offset;
 };

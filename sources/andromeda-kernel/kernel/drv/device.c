@@ -3,6 +3,7 @@
 #include "drv/biosdisk.h"
 #include "drv/console.h"
 #include "drv/loopback.h"
+#include "drv/mem.h"
 #include "fs/pgcache.h"
 #include "fs/vfs.h"
 #include "mem/pmem.h"
@@ -84,9 +85,10 @@ static const file_ops_t special_null_ops = {
         .write = special_null_write,
 };
 
-static int open_special(uint32_t minor, file_t *file, int) {
+static int open_special(uint32_t minor, file_t *file, int flags) {
     switch (minor) {
     case DRIVER_SPECIAL_NULL: file->ops = &special_null_ops; return 0;
+    case DRIVER_SPECIAL_MEM: return open_dev_mem(file, flags);
     default: return ENXIO;
     }
 }

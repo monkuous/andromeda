@@ -43,7 +43,7 @@ page_t *pmem_alloc(bool cache);
 
 void pmem_free(page_t *page, bool cache);
 
-page_t *pmem_alloc_slow(size_t count, uint32_t max_addr);
+int pmem_alloc_slow(page_t **out, size_t count, size_t align, uint32_t max_addr);
 void pmem_free_multiple(page_t *pages, size_t count);
 
 void pmem_add_region(uint32_t head, uint32_t tail, uint32_t alloc_tail);

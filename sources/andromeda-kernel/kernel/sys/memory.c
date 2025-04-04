@@ -73,7 +73,7 @@ static int get_location(struct futex_loc *out, uintptr_t addr) {
     vm_region_t *region = vm_get_region(addr);
     if (unlikely(!region)) return EFAULT;
 
-    out->inode = region->src.inode;
+    out->inode = region->src->inode;
 
     if (out->inode) {
         // caller is responsible for increasing the inode ref count if necessary

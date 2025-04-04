@@ -1,10 +1,11 @@
-From 7057d8a0a3201a0089140d6f68475215473a9eb5 Mon Sep 17 00:00:00 2001
+From 2a3c093f6c17942e87494adebf7d211af00cd531 Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
 
 ---
  meson.build                                   |  18 +-
+ options/ansi/generic/stdio.cpp                |   4 +-
  options/ansi/include/bits/ansi/time_t.h       |   4 +-
  options/elf/include/elf.h                     |   1 +
  options/internal/include/bits/off_t.h         |   6 +-
@@ -73,14 +74,15 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/abi-bits/wait.h     |   1 +
  sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
  sysdeps/andromeda/include/andromeda/ioctl.h   |   6 +
+ sysdeps/andromeda/include/andromeda/memory.h  |  16 +
  sysdeps/andromeda/include/andromeda/mount.h   |  15 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
  sysdeps/andromeda/include/andromeda/syscall.h |  59 ++
- sysdeps/andromeda/include/meson.build         |  62 ++
+ sysdeps/andromeda/include/meson.build         |  63 ++
  sysdeps/andromeda/include/mntent.h            |  43 ++
  sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 76 files changed, 1888 insertions(+), 10 deletions(-)
+ 78 files changed, 1907 insertions(+), 12 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -143,6 +145,7 @@ Subject: [PATCH] Add Andromeda port
  create mode 120000 sysdeps/andromeda/include/abi-bits/wait.h
  create mode 120000 sysdeps/andromeda/include/abi-bits/xattr.h
  create mode 100644 sysdeps/andromeda/include/andromeda/ioctl.h
+ create mode 100644 sysdeps/andromeda/include/andromeda/memory.h
  create mode 100644 sysdeps/andromeda/include/andromeda/mount.h
  create mode 100644 sysdeps/andromeda/include/andromeda/string.h
  create mode 100644 sysdeps/andromeda/include/andromeda/syscall.h
@@ -210,6 +213,28 @@ index eae40c4f..4ca20afb 100644
  configure_file(input: 'internal-config.h.in',
  	output: 'internal-config.h',
  	configuration: internal_conf)
+diff --git a/options/ansi/generic/stdio.cpp b/options/ansi/generic/stdio.cpp
+index 2dd7cfb4..d3d45cec 100644
+--- a/options/ansi/generic/stdio.cpp
++++ b/options/ansi/generic/stdio.cpp
+@@ -392,7 +392,8 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
+ 			} else {
+ 				char *typed_dest = (char *)dest;
+ 				if(typed_dest)
+-					typed_dest[count++] = c;
++					typed_dest[count] = c;
++				count++;
+ 			}
+ 		};
+ 
+@@ -647,7 +648,6 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
+ 					handler.consume();
+ 					append_to_buffer(c);
+ 					c = handler.look_ahead();
+-					count++;
+ 				}
+ 				break;
+ 			}
 diff --git a/options/ansi/include/bits/ansi/time_t.h b/options/ansi/include/bits/ansi/time_t.h
 index 1c29fa0f..88600a8e 100644
 --- a/options/ansi/include/bits/ansi/time_t.h
@@ -2345,6 +2370,28 @@ index 00000000..603a6e10
 +#define TCSETS 0x5402
 +#define TCSETSW 0x5403
 +#define TCSETSF 0x5404
+diff --git a/sysdeps/andromeda/include/andromeda/memory.h b/sysdeps/andromeda/include/andromeda/memory.h
+new file mode 100644
+index 00000000..caa8e35e
+--- /dev/null
++++ b/sysdeps/andromeda/include/andromeda/memory.h
+@@ -0,0 +1,16 @@
++#ifndef _ANDROMEDA_MEMORY_H
++#define _ANDROMEDA_MEMORY_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++typedef struct {
++	size_t align;
++	size_t pages;
++	uint64_t addr; /* on entry, this is the highest allowed address. changed on exit. */
++	int flags;     /* flags that should be set on the fd */
++} andromeda_pmalloc_t;
++
++#define IOCTL_PMALLOC 0x10000
++
++#endif /* _ANDROMEDA_MEMORY_H */
 diff --git a/sysdeps/andromeda/include/andromeda/mount.h b/sysdeps/andromeda/include/andromeda/mount.h
 new file mode 100644
 index 00000000..c8b2041d
@@ -2450,10 +2497,10 @@ index 00000000..01deaff8
 +#endif /* _ANDROMEDA_SYSCALL_H */
 diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build
 new file mode 100644
-index 00000000..26a00400
+index 00000000..c1e6b46b
 --- /dev/null
 +++ b/sysdeps/andromeda/include/meson.build
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +if not no_headers
 +    install_headers(
 +        'abi-bits/access.h',
@@ -2507,6 +2554,7 @@ index 00000000..26a00400
 +        'abi-bits/wait.h',
 +        'abi-bits/xattr.h',
 +        'andromeda/ioctl.h',
++        'andromeda/memory.h',
 +        'andromeda/mount.h',
 +        'andromeda/string.h',
 +        'andromeda/syscall.h',

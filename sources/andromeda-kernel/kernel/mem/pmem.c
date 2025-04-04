@@ -5,6 +5,7 @@
 #include "mem/layout.h"
 #include "string.h"
 #include "util/panic.h"
+#include <errno.h>
 #include <stdint.h>
 
 page_t *page_array;
@@ -116,6 +117,7 @@ struct alloc_slow_ctx {
         uint32_t offset;
         page_t *page;
     };
+    uint32_t align;
     uint32_t max_tail;
 };
 
@@ -129,7 +131,7 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
     if (tail < ctx->offset) return true;
     if (tail > ctx->max_tail) tail = ctx->max_tail;
 
-    uint32_t alloc_head = tail - ctx->offset;
+    uint32_t alloc_head = (tail - ctx->offset) & ~ctx->align;
     uint32_t count = (ctx->offset >> PAGE_SHIFT) + 1;
 
     while (head <= alloc_head) {
@@ -148,7 +150,7 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
 
                 uint32_t new_alloc_tail = page_to_phys(page) - 1;
                 if (new_alloc_tail < ctx->offset) return true;
-                alloc_head = new_alloc_tail - ctx->offset;
+                alloc_head = (new_alloc_tail - ctx->offset) & ~ctx->align;
                 break;
             }
         }
@@ -207,21 +209,30 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
     return true;
 }
 
-page_t *pmem_alloc_slow(size_t count, uint32_t max_addr) {
-    if (!count) return page_array;
+int pmem_alloc_slow(page_t **out, size_t count, size_t align, uint32_t max_addr) {
+    if (!count) return EINVAL;
+    if (!align) return EINVAL;
+    if (align & (align - 1)) return EINVAL;
+    if (align & PAGE_MASK) return EINVAL;
 
-    if (max_addr < PAGE_MASK) return nullptr;
+    if (max_addr < PAGE_MASK) return EINVAL;
     max_addr = (max_addr - PAGE_MASK) | PAGE_MASK;
 
     uint32_t offset = ((count - 1) << PAGE_SHIFT) | PAGE_MASK;
-    if (max_addr < offset) return nullptr;
+    if (max_addr < offset) return EINVAL;
 
     struct alloc_slow_ctx ctx = {
             .offset = offset,
+            .align = align - 1,
             .max_tail = max_addr,
     };
 
-    return !bootmem_iter(alloc_slow_func, &ctx, true) ? ctx.page : nullptr;
+    if (!bootmem_iter(alloc_slow_func, &ctx, true)) {
+        *out = ctx.page;
+        return 0;
+    } else {
+        return ENOMEM;
+    }
 }
 
 void pmem_free_multiple(page_t *pages, size_t count) {

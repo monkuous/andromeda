@@ -330,9 +330,9 @@ static vm_region_t *clone_region(vm_t *dvm, vm_region_t *src) {
     dst->src = src->src;
     dst->offset = src->offset;
 
-    if (dst->src.inode) {
-        inode_ref(dst->src.inode);
-        list_insert_tail(&dst->src.inode->data.mappings, &dst->snode);
+    if (dst->src) {
+        file_ref(dst->src);
+        list_insert_tail(&dst->src->inode->data.mappings, &dst->snode);
     }
 
     pmap_clone(&dvm->pmap, dst->head, dst->tail - dst->head + 1, dst->flags & MAP_PRIVATE);
@@ -417,9 +417,9 @@ void vm_free(vm_t *vm) {
     while (cur) {
         vm_region_t *next = container(vm_region_t, node, cur->node.next);
 
-        if (cur->src.inode) {
-            list_remove(&cur->src.inode->data.mappings, &cur->snode);
-            inode_deref(cur->src.inode);
+        if (cur->src) {
+            list_remove(&cur->src->inode->data.mappings, &cur->snode);
+            file_deref(cur->src);
         }
 
         vmfree(cur, sizeof(*cur));
@@ -495,9 +495,9 @@ static int remove_overlapping_regions(
             nreg->src = cur->src;
             nreg->offset = cur->offset + (nreg->head - cur->head);
 
-            if (cur->src.inode) {
-                inode_ref(cur->src.inode);
-                list_insert_tail(&cur->src.inode->data.mappings, &nreg->snode);
+            if (cur->src) {
+                file_ref(cur->src);
+                list_insert_tail(&cur->src->inode->data.mappings, &nreg->snode);
             }
 
             cur->tail = head - 1;
@@ -534,9 +534,9 @@ static int remove_overlapping_regions(
             tree_del(vm, cur);
             list_remove(&vm->regions, &cur->node);
 
-            if (cur->src.inode) {
-                list_remove(&cur->src.inode->data.mappings, &cur->snode);
-                inode_deref(cur->src.inode);
+            if (cur->src) {
+                list_remove(&cur->src->inode->data.mappings, &cur->snode);
+                file_deref(cur->src);
             }
 
             vmfree(cur, sizeof(*cur));
@@ -555,9 +555,8 @@ static bool can_merge(vm_region_t *r1, vm_region_t *r2) {
     if (r1->tail + 1 != r2->head) return false;
     if (r1->flags != r2->flags) return false;
     if (r1->prot != r2->prot) return false;
-    if (r1->src.inode != r2->src.inode) return false;
-    if (r1->src.avail_prot != r2->src.avail_prot) return false;
-    if (r1->src.inode && r1->offset + (r2->head - r1->head) != r2->offset) return false;
+    if (r1->src != r2->src) return false;
+    if (r1->src && r1->offset + (r2->head - r1->head) != r2->offset) return false;
 
     return true;
 }
@@ -573,12 +572,12 @@ static void merge_or_insert(vm_t *vm, vm_region_t *prev, vm_region_t *next, vm_r
         tree_del(vm, next);
         list_remove(&vm->regions, &next->node);
 
-        if (prev->src.inode) {
+        if (prev->src) {
             // both can merge with prev, so prev->src == region->src == next->src
-            list_remove(&prev->src.inode->data.mappings, &region->snode);
-            list_remove(&prev->src.inode->data.mappings, &next->snode);
-            inode_deref(prev->src.inode);
-            inode_deref(prev->src.inode);
+            list_remove(&prev->src->inode->data.mappings, &region->snode);
+            list_remove(&prev->src->inode->data.mappings, &next->snode);
+            file_deref(prev->src);
+            file_deref(prev->src);
         }
 
         vmfree(region, sizeof(*region));
@@ -586,18 +585,18 @@ static void merge_or_insert(vm_t *vm, vm_region_t *prev, vm_region_t *next, vm_r
     } else if (prev_merge) {
         prev->tail = region->tail;
 
-        if (prev->src.inode) {
-            list_remove(&prev->src.inode->data.mappings, &region->snode);
-            inode_deref(prev->src.inode);
+        if (prev->src) {
+            list_remove(&prev->src->inode->data.mappings, &region->snode);
+            file_deref(prev->src);
         }
 
         vmfree(region, sizeof(*region));
     } else if (next_merge) {
         tree_mov(vm, next, region->head);
 
-        if (next->src.inode) {
-            list_remove(&next->src.inode->data.mappings, &region->snode);
-            inode_deref(next->src.inode);
+        if (next->src) {
+            list_remove(&next->src->inode->data.mappings, &region->snode);
+            file_deref(next->src);
         }
 
         vmfree(region, sizeof(*region));
@@ -605,6 +604,21 @@ static void merge_or_insert(vm_t *vm, vm_region_t *prev, vm_region_t *next, vm_r
         tree_add(vm, region);
         list_insert_after(&vm->regions, &prev->node, &region->node);
     }
+}
+
+static int check_prot(file_t *file, int flags, int prot) {
+    int avail_prot;
+
+    switch (file->flags & O_ACCMODE) {
+    case O_RDONLY: avail_prot = PROT_READ | PROT_EXEC; break;
+    case O_WRONLY: return EACCES;
+    case O_RDWR: avail_prot = PROT_READ | PROT_WRITE | PROT_EXEC; break;
+    default: UNREACHABLE();
+    }
+
+    if ((flags & MAP_SHARED) && (prot & ~avail_prot)) return EACCES;
+
+    return 0;
 }
 
 static int do_map(
@@ -629,16 +643,10 @@ static int do_map(
     region->offset = offset;
 
     if (file) {
-        region->src.inode = file->inode;
+        region->src = file;
 
-        switch (file->flags & O_ACCMODE) {
-        case O_RDONLY: region->src.avail_prot = PROT_READ | PROT_EXEC; break;
-        case O_WRONLY: vmfree(region, sizeof(*region)); return EACCES;
-        case O_RDWR: region->src.avail_prot = PROT_READ | PROT_WRITE | PROT_EXEC; break;
-        default: UNREACHABLE();
-        }
-
-        if ((flags & MAP_SHARED) && (prot & ~region->src.avail_prot)) {
+        int error = check_prot(file, flags, prot);
+        if (unlikely(error)) {
             vmfree(region, sizeof(*region));
             return EACCES;
         }
@@ -651,14 +659,14 @@ static int do_map(
     }
 
     if (file) {
-        inode_ref(file->inode);
+        file_ref(file);
         list_insert_tail(&file->inode->data.mappings, &region->snode);
     }
 
     merge_or_insert(vm, prev, next, region);
 
-    if (file && file->ops->mmap) {
-        file->ops->mmap(file, head, tail, offset, flags);
+    if (file && file->ops->mmap && prot != PROT_NONE) {
+        file->ops->mmap(file, head, tail, offset, flags, prot);
     }
 
     return 0;
@@ -769,7 +777,17 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             if (cur->head < head) alloc_extra(&regions[extra_regions++]);
             if (cur->tail > tail) alloc_extra(&regions[extra_regions++]);
 
-            if (cur->src.inode && (cur->flags & MAP_SHARED) && (prot & ~cur->src.avail_prot)) return EACCES;
+            if (cur->src) {
+                int error = check_prot(cur->src, cur->flags, cur->prot);
+
+                if (unlikely(error)) {
+                    for (size_t i = 0; i < extra_regions; i++) {
+                        vmfree(regions[i], sizeof(*regions[i]));
+                    }
+
+                    return error;
+                }
+            }
         }
 
         cur = container(vm_region_t, node, cur->node.next);
@@ -814,11 +832,11 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             regions[1]->src = cur->src;
             regions[1]->offset = cur->offset + (tail + 1 - cur->head);
 
-            if (cur->src.inode) {
-                inode_ref(cur->src.inode);
-                inode_ref(cur->src.inode);
-                list_insert_tail(&cur->src.inode->data.mappings, &regions[0]->snode);
-                list_insert_tail(&cur->src.inode->data.mappings, &regions[1]->snode);
+            if (cur->src) {
+                file_ref(cur->src);
+                file_ref(cur->src);
+                list_insert_tail(&cur->src->inode->data.mappings, &regions[0]->snode);
+                list_insert_tail(&cur->src->inode->data.mappings, &regions[1]->snode);
             }
 
             cur->tail = head - 1;
@@ -846,9 +864,9 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             region->src = cur->src;
             region->offset = cur->offset + (head - cur->head);
 
-            if (cur->src.inode) {
-                inode_ref(cur->src.inode);
-                list_insert_tail(&cur->src.inode->data.mappings, &region->snode);
+            if (cur->src) {
+                file_ref(cur->src);
+                list_insert_tail(&cur->src->inode->data.mappings, &region->snode);
             }
 
             cur->tail = head - 1;
@@ -870,9 +888,9 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             cur->src = region->src;
             cur->offset = region->offset + (cur->head - region->head);
 
-            if (cur->src.inode) {
-                inode_ref(cur->src.inode);
-                list_insert_tail(&cur->src.inode->data.mappings, &cur->snode);
+            if (cur->src) {
+                file_ref(cur->src);
+                list_insert_tail(&cur->src->inode->data.mappings, &cur->snode);
             }
 
             region->tail = tail;
@@ -882,10 +900,19 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             region = cur;
         }
 
+        int old_prot = region->prot;
         region->prot = prot;
 
         if (prot) {
-            pmap_remap(region->head, region->tail - region->head + 1, prot & PROT_WRITE ? PMAP_WRITABLE : 0);
+            if (old_prot == PROT_NONE) {
+                if (region->src && region->src->ops->mmap) {
+                    region->src->ops
+                            ->mmap(region->src, region->head, region->tail, region->offset, region->flags, region->prot
+                            );
+                }
+            } else {
+                pmap_remap(region->head, region->tail - region->head + 1, prot & PROT_WRITE ? PMAP_WRITABLE : 0);
+            }
         } else {
             pmap_unmap(region->head, region->tail - region->head + 1, false);
         }

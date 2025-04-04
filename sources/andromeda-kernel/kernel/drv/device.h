@@ -5,13 +5,15 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define DRIVER_PSEUDO_FS 0
-#define DRIVER_BIOSDISK 1
-#define DRIVER_LOOPBACK 2
-#define DRIVER_CONSOLE 3
-#define DRIVER_SPECIAL 4
+#define DRIVER_RESERVED 0
+#define DRIVER_PSEUDO_FS 1
+#define DRIVER_BIOSDISK 2
+#define DRIVER_LOOPBACK 3
+#define DRIVER_CONSOLE 4
+#define DRIVER_SPECIAL 5
 
 #define DRIVER_SPECIAL_NULL 0
+#define DRIVER_SPECIAL_MEM 1
 
 #define DEVICE_ID(driver, id) (((dev_t)(driver) << 32) | (id))
 
