@@ -193,15 +193,14 @@ static size_t conv_fatname(unsigned char *out, fat_dirent_t *entry) {
     size_t last = 0;
 
     for (size_t i = 0; i < sizeof(entry->name); i++) {
-        if (i == 8) {
-            *out++ = '.';
-            last = i;
-        }
+        if (i == 8) last = i;
 
         unsigned char c = entry->name[i];
         if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
 
         if (c != ' ') {
+            if (last == 8) *out++ = '.';
+
             if (last != i) {
                 size_t cnt = i - last;
                 memset(out, ' ', cnt);
