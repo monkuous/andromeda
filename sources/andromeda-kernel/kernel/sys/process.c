@@ -124,16 +124,13 @@ int sys_SIGACTION(int sig, uintptr_t act, uintptr_t oact) {
 pid_t sys_FORK() {
     vm_t *vm = vm_clone();
 
-    thread_t *thread = thread_create(nullptr, nullptr);
+    thread_t *thread;
+    pid_t pid = pfork(&thread);
+    if (unlikely(pid < 0)) return pid;
+
     thread->vm->references -= 1;
     thread->vm = vm;
     thread->sigstack = current->sigstack;
-
-    pid_t pid = pfork(thread);
-    if (unlikely(pid < 0)) {
-        thread_deref(thread); // this takes care of destroying the vm
-        return pid;
-    }
 
     thread->regs.eax = 0; // set syscall return value in child
     sched_unblock(thread);

@@ -1,4 +1,4 @@
-From 761a03d55048e10cb6509a87f3f0058b307ec86f Mon Sep 17 00:00:00 2001
+From 2c1030015211dd81ec7c6a09f90be6b107d4be6a Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
@@ -17,9 +17,9 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/crt/crtn.S                  |  12 +
  sysdeps/andromeda/crt/meson.build             |  13 +
  sysdeps/andromeda/generic/entry.cpp           |  17 +
- sysdeps/andromeda/generic/generic.cpp         | 535 +++++++++++++++++
+ sysdeps/andromeda/generic/generic.cpp         | 649 ++++++++++++++++++
  sysdeps/andromeda/generic/meson.build         |   2 +
- sysdeps/andromeda/generic/mntent.cpp          | 164 ++++++
+ sysdeps/andromeda/generic/mntent.cpp          | 164 +++++
  sysdeps/andromeda/include/abi-bits/access.h   |   1 +
  sysdeps/andromeda/include/abi-bits/auxv.h     |   1 +
  sysdeps/andromeda/include/abi-bits/blkcnt_t.h |   1 +
@@ -53,7 +53,7 @@ Subject: [PATCH] Add Andromeda port
  .../andromeda/include/abi-bits/seek-whence.h  |   1 +
  sysdeps/andromeda/include/abi-bits/shm.h      |   1 +
  sysdeps/andromeda/include/abi-bits/sigevent.h |   1 +
- sysdeps/andromeda/include/abi-bits/signal.h   | 537 ++++++++++++++++++
+ sysdeps/andromeda/include/abi-bits/signal.h   | 537 +++++++++++++++
  sysdeps/andromeda/include/abi-bits/sigval.h   |   1 +
  sysdeps/andromeda/include/abi-bits/socket.h   |   1 +
  .../andromeda/include/abi-bits/socklen_t.h    |   1 +
@@ -72,12 +72,12 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
  sysdeps/andromeda/include/andromeda/ioctl.h   |   6 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
- sysdeps/andromeda/include/andromeda/syscall.h |  50 ++
+ sysdeps/andromeda/include/andromeda/syscall.h |  57 ++
  sysdeps/andromeda/include/meson.build         |  61 ++
  sysdeps/andromeda/include/mntent.h            |  43 ++
- sysdeps/andromeda/include/sys/sysmacros.h     |  33 ++
+ sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 73 files changed, 1710 insertions(+), 10 deletions(-)
+ 73 files changed, 1831 insertions(+), 10 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -454,11 +454,10 @@ index 00000000..6e28747f
 +}
 diff --git a/sysdeps/andromeda/generic/generic.cpp b/sysdeps/andromeda/generic/generic.cpp
 new file mode 100644
-index 00000000..1fa868e5
+index 00000000..dd1919d5
 --- /dev/null
 +++ b/sysdeps/andromeda/generic/generic.cpp
-@@ -0,0 +1,535 @@
-+#include "mlibc/posix-sysdeps.hpp"
+@@ -0,0 +1,649 @@
 +#include <andromeda/ioctl.h>
 +#include <andromeda/string.h>
 +#include <andromeda/syscall.h>
@@ -466,8 +465,11 @@ index 00000000..1fa868e5
 +#include <frg/vector.hpp>
 +#include <mlibc/all-sysdeps.hpp>
 +#include <mlibc/allocator.hpp>
++#include <mlibc/arch-defs.hpp>
 +#include <stdlib.h>
 +#include <string.h>
++
++#define STACK_SIZE 0x800000
 +
 +typedef struct {
 +	long r1;
@@ -566,11 +568,17 @@ index 00000000..1fa868e5
 +		return EINVAL;
 +	}
 +
-+	*window =
-+	    (void *)SYSCALL(
-+	        6, SYS_MMAP, hint, size, (prot << 28) | flags, fd, (long)offset, (long)(offset >> 32)
-+	    )
-+	        .r2;
++	*window = (void *)SYSCALL(
++	              6,
++	              SYS_MMAP,
++	              hint,
++	              size,
++	              (prot << 28) | flags,
++	              fd,
++	              (unsigned long)offset,
++	              (unsigned long)(offset >> 32)
++	)
++	              .r2;
 +	return 0;
 +}
 +
@@ -600,16 +608,16 @@ index 00000000..1fa868e5
 +	    SYS_FUTEX_WAIT,
 +	    pointer,
 +	    expected,
-+	    (long)time->tv_sec,
-+	    (long)(time->tv_sec >> 32),
++	    (unsigned long)time->tv_sec,
++	    (unsigned long)(time->tv_sec >> 32),
 +	    time->tv_nsec
 +	);
 +	return 0;
 +}
 +
 +int sys_seek(int fd, off_t offset, int whence, off_t *new_offset) {
-+	long low = offset;
-+	long high = offset >> 32;
++	unsigned long low = offset;
++	unsigned long high = offset >> 32;
 +
 +	syscall_result_t result = SYSCALL(4, SYS_SEEK, fd, low, high, whence);
 +	*new_offset = ((off_t)result.r1 << 32) | result.r2;
@@ -990,6 +998,112 @@ index 00000000..1fa868e5
 +	syscall_result_t result = SYSCALL(1, SYS_PIPE, flags);
 +	fds[0] = result.r1;
 +	fds[1] = result.r2;
++	return 0;
++}
++
++int sys_pread(int fd, void *buf, size_t n, off_t off, ssize_t *bytes_read) {
++	*bytes_read =
++	    SYSCALL(5, SYS_PREAD, fd, buf, n, (unsigned long)off, (unsigned long)(off >> 32)).r1;
++	return 0;
++}
++
++int sys_pwrite(int fd, const void *buf, size_t n, off_t off, ssize_t *bytes_read) {
++	*bytes_read =
++	    SYSCALL(5, SYS_PWRITE, fd, buf, n, (unsigned long)off, (unsigned long)(off >> 32)).r1;
++	return 0;
++}
++
++int sys_rmdir(const char *path) { return sys_unlinkat(AT_FDCWD, path, AT_REMOVEDIR); }
++
++int sys_unlinkat(int dirfd, const char *path, int flags) {
++	SYSCALL(4, SYS_UNLINK, dirfd, path, strlen(path), flags);
++	return 0;
++}
++
++int sys_rename(const char *path, const char *new_path) {
++	return sys_renameat(AT_FDCWD, path, AT_FDCWD, new_path);
++}
++
++int sys_renameat(int olddirfd, const char *old_path, int newdirfd, const char *new_path) {
++	SYSCALL(
++	    6, SYS_RENAME, olddirfd, old_path, strlen(old_path), newdirfd, new_path, strlen(new_path)
++	);
++	return 0;
++}
++
++void sys_thread_exit() {
++	SYSCALL1(SYS_EXIT_THREAD, 0);
++	__builtin_unreachable();
++}
++
++int sys_vm_protect(void *pointer, size_t size, int prot) {
++	SYSCALL(3, SYS_MPROTECT, pointer, size, prot);
++	return 0;
++}
++
++int sys_prepare_stack(
++    void **stack,
++    void *entry,
++    void *user_arg,
++    [[maybe_unused]] void *tcb,
++    size_t *stack_size,
++    size_t *guard_size,
++    void **stack_base
++) {
++	void *base = *stack;
++	size_t ssize = *stack_size;
++	size_t gsize = *guard_size;
++
++	if (!ssize) {
++		ssize = STACK_SIZE;
++
++		if (base) {
++			return EINVAL;
++		}
++	}
++
++	gsize = (gsize + (page_size - 1)) & ~(page_size - 1);
++	ssize = (ssize + (page_size - 1)) & ~(page_size - 1);
++
++	if (!base) {
++		void *guard;
++
++		if (int e = sys_vm_map(
++		        nullptr, ssize + gsize, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0, &guard
++		    )) {
++			return e;
++		}
++
++		base = reinterpret_cast<void *>(reinterpret_cast<char *>(guard) + gsize);
++
++		if (int e = sys_vm_protect(base, ssize, PROT_READ | PROT_WRITE)) {
++			sys_vm_unmap(guard, ssize + gsize);
++			return e;
++		}
++	} else {
++		gsize = 0;
++	}
++
++	*stack_size = ssize;
++	*guard_size = gsize;
++	*stack_base = base;
++
++	// -20 to ensure the stack is aligned to 16 bytes on entry
++	auto sp = reinterpret_cast<void **>(reinterpret_cast<char *>(base) + (ssize - 20));
++	sp[0] = nullptr;
++	sp[1] = user_arg;
++	sp[2] = entry;
++	*stack = sp;
++	return 0;
++}
++
++[[noreturn]] static void thread_entry(void (*func)(void *), void *ctx) {
++	func(ctx);
++	sys_thread_exit();
++}
++
++int sys_clone(void *tcb, pid_t *pid_out, void *stack) {
++	*pid_out = SYSCALL(3, SYS_CREATE_THREAD, thread_entry, tcb, stack).r1;
 +	return 0;
 +}
 +}; // namespace mlibc
@@ -2193,10 +2307,10 @@ index 00000000..58bac89d
 +#endif /* _ANDROMEDA_STRING_H */
 diff --git a/sysdeps/andromeda/include/andromeda/syscall.h b/sysdeps/andromeda/include/andromeda/syscall.h
 new file mode 100644
-index 00000000..9b063601
+index 00000000..90ff2dfd
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/syscall.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,57 @@
 +#ifndef _ANDROMEDA_SYSCALL_H
 +#define _ANDROMEDA_SYSCALL_H
 +
@@ -2245,6 +2359,13 @@ index 00000000..9b063601
 +#define SYS_SETHOSTNAME 42
 +#define SYS_UNAME 43
 +#define SYS_PIPE 44
++#define SYS_PREAD 45
++#define SYS_PWRITE 46
++#define SYS_UNLINK 47
++#define SYS_RENAME 48
++#define SYS_EXIT_THREAD 49
++#define SYS_MPROTECT 50
++#define SYS_CREATE_THREAD 51
 +
 +#endif /* _ANDROMEDA_SYSCALL_H */
 diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build

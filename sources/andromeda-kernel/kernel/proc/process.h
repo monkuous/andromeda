@@ -80,9 +80,12 @@ struct procent {
     procent_t *prev;
     procent_t *next;
 
+    bool has_thread : 1;
     bool has_process : 1;
     bool has_group : 1;
     bool has_session : 1;
+
+    thread_t thread;
     process_t process;
     prgroup_t group;
     session_t session;
@@ -93,6 +96,7 @@ extern procent_t init_procent;
 
 void init_proc();
 
+pid_t gettid();
 pid_t getpgid(pid_t pid);
 pid_t getpid();
 pid_t getppid();
@@ -115,14 +119,17 @@ int setuid(uid_t uid);
 
 relation_t get_relation(uid_t uid, gid_t gid, bool real);
 
-// forks the current process and makes the given thread join the new process
-// the thread must belong to the current process, and must be in THREAD_CREATED
-pid_t pfork(thread_t *thread);
+// forks the current process and creates a new thread in it
+pid_t pfork(thread_t **thread);
+
+// forks the current thread
+pid_t tfork(thread_t **thread);
 
 // Allowed to yield.
 pid_t pwait(pid_t pid, int options, void (*cont)(pid_t, siginfo_t *, void *), void *ctx);
 
 void remove_thread_from_process(thread_t *thread);
+void free_thread_struct(thread_t *thread);
 
 void kill_other_threads();
 void proc_kill(pending_signal_t *trigger);

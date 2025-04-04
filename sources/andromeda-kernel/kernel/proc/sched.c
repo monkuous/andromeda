@@ -2,25 +2,31 @@
 #include "cpu/gdt.h"
 #include "drv/idle.h"
 #include "mem/pmap.h"
-#include "mem/vmalloc.h"
 #include "mem/vmm.h"
 #include "proc/process.h"
 #include "proc/signal.h"
-#include "string.h"
 #include "util/container.h"
 #include "util/list.h"
 #include "util/panic.h"
 
-static thread_t init_thread = {
-        .state = THREAD_RUNNING,
-        .process = &init_process,
-};
 static list_t thread_queue;
 
-thread_t *current = &init_thread;
+thread_t *current = &init_procent.thread;
 
 static thread_t *pop_thread() {
     return container(thread_t, node, list_remove_head(&thread_queue));
+}
+
+static void do_thread_free(thread_t *thread) {
+    if (--thread->vm->references == 0) {
+        vm_t *vm = vm_join(thread->vm);
+        clean_cur_pmap();
+        vm_join(vm);
+        vm_free(thread->vm);
+    }
+
+    cleanup_signals(&thread->signals);
+    free_thread_struct(thread);
 }
 
 static void handle_switch(thread_t *prev) {
@@ -37,7 +43,7 @@ static void handle_switch(thread_t *prev) {
             switch_pmap(&current->vm->pmap);
         }
 
-        thread_deref(prev);
+        do_thread_free(prev);
     } else if (prev->vm != current->vm) {
         switch_pmap(&current->vm->pmap);
     }
@@ -93,10 +99,6 @@ void sched_exit() {
 }
 
 static void do_wake(thread_t *thread, wake_reason_t reason) {
-    if (thread->state == THREAD_CREATED) {
-        thread_ref(thread);
-    }
-
     thread->wake_reason = reason;
 
     if (thread->state != THREAD_RUNNING) {
@@ -116,16 +118,10 @@ void sched_unblock(thread_t *thread) {
     do_wake(thread, WAKE_UNBLOCK);
 }
 
-thread_t *thread_create(thread_cont_t cont, void *ctx) {
-    thread_t *thread = vmalloc(sizeof(*thread));
-    memset(thread, 0, sizeof(*thread));
-
-    thread->references = 1;
+void thread_create(thread_t *thread, thread_cont_t cont, void *ctx) {
     thread->state = THREAD_CREATED;
     thread->continuation.func = cont;
     thread->continuation.ctx = ctx;
-    thread->process = current->process;
-    list_insert_tail(&current->process->threads, &thread->pnode);
 
     thread->regs = current->regs;
     thread->tdata = current->tdata;
@@ -135,28 +131,10 @@ thread_t *thread_create(thread_cont_t cont, void *ctx) {
 
     thread->vm = current->vm;
     thread->vm->references += 1;
-
-    return thread;
 }
 
-void thread_ref(thread_t *thread) {
-    thread->references += 1;
-}
-
-void thread_deref(thread_t *thread) {
-    if (--thread->references == 0) {
-        if (thread->state == THREAD_CREATED) {
-            remove_thread_from_process(thread);
-
-            if (--thread->vm->references == 0) {
-                vm_t *vm = vm_join(thread->vm);
-                clean_cur_pmap();
-                vm_join(vm);
-                vm_free(thread->vm);
-            }
-        }
-
-        cleanup_signals(&thread->signals);
-        vmfree(thread, sizeof(*thread));
-    }
+void thread_free(thread_t *thread) {
+    ASSERT(thread->state == THREAD_CREATED);
+    remove_thread_from_process(thread);
+    do_thread_free(thread);
 }

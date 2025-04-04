@@ -30,3 +30,7 @@ ssize_t sys_GETCWD(uintptr_t buf, size_t size);
 ssize_t sys_READDIR(int fd, uintptr_t buf, size_t max_size);
 ssize_t sys_READLINK(int dirfd, uintptr_t path, size_t length, uintptr_t buffer, size_t size);
 int64_t sys_PIPE(int flags);
+ssize_t sys_PREAD(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32_t off_high);
+ssize_t sys_PWRITE(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32_t off_high);
+int sys_UNLINK(int dirfd, uintptr_t path, size_t length, int flags);
+int sys_RENAME(int srcdirfd, uintptr_t srcpath, size_t srclength, int dstdirfd, uintptr_t dstpath, size_t dstlength);

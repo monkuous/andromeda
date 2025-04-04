@@ -505,6 +505,16 @@ void pmap_unmap(uintptr_t virt, size_t size, bool skip_anon) {
     }
 }
 
+bool pmap_walk(uint32_t *phys_out, uintptr_t virt) {
+    if (!CUR_PAGE_DIR[(virt >> 22) & 1023]) return false;
+
+    uint32_t pte = *(uint32_t *)(PTBL_VIRT_BASE | ((virt >> 10) & ~3));
+    if (!pte) return false;
+
+    *phys_out = pte & PTE_ADDR;
+    return true;
+}
+
 void *pmap_tmpmap(uint32_t phys) {
     ASSERT(!(phys & PAGE_MASK));
 

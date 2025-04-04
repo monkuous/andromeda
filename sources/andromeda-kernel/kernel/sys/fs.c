@@ -613,3 +613,89 @@ int64_t sys_PIPE(int flags) {
 
     return ((int64_t)rfd << 32) | wfd;
 }
+
+ssize_t sys_PREAD(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32_t off_high) {
+    if (unlikely(count < 0)) return -EINVAL;
+    if (unlikely(off_high & 0x80000000)) return -EINVAL;
+
+    int error = -verify_pointer(buf, count);
+    if (unlikely(error)) return error;
+
+    file_t *file;
+    error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    count = vfs_pread(file, (void *)buf, count, ((uint64_t)off_high << 32) | off_low);
+    file_deref(file);
+    return count;
+}
+
+ssize_t sys_PWRITE(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32_t off_high) {
+    if (unlikely(count < 0)) return -EINVAL;
+    if (unlikely(off_high & 0x80000000)) return -EINVAL;
+
+    int error = -verify_pointer(buf, count);
+    if (unlikely(error)) return error;
+
+    file_t *file;
+    error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    count = vfs_pwrite(file, (const void *)buf, count, ((uint64_t)off_high << 32) | off_low);
+    file_deref(file);
+    return count;
+}
+
+int sys_UNLINK(int dirfd, uintptr_t path, size_t length, int flags) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_unlink(rel, buf, length, flags);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_RENAME(int srcdirfd, uintptr_t srcpath, size_t srclength, int dstdirfd, uintptr_t dstpath, size_t dstlength) {
+    int error = -verify_pointer(srcpath, srclength);
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer(dstpath, dstlength);
+    if (unlikely(error)) return error;
+
+    void *srcbuf = vmalloc(srclength);
+    error = -user_memcpy(srcbuf, (const void *)srcpath, srclength);
+    if (unlikely(error)) goto exit;
+
+    void *dstbuf = vmalloc(dstlength);
+    error = -user_memcpy(dstbuf, (const void *)dstpath, dstlength);
+    if (unlikely(error)) goto exit2;
+
+    file_t *srcrel;
+    error = -get_at_file(&srcrel, srcdirfd);
+    if (unlikely(error)) goto exit2;
+
+    file_t *dstrel;
+    error = -get_at_file(&dstrel, dstdirfd);
+    if (unlikely(error)) goto exit3;
+
+    error = -vfs_rename(srcrel, srcbuf, srclength, dstrel, dstbuf, dstlength);
+
+    if (dstrel) file_deref(dstrel);
+exit3:
+    if (srcrel) file_deref(srcrel);
+exit2:
+    vmfree(dstbuf, dstlength);
+exit:
+    vmfree(srcbuf, srclength);
+    return error;
+}

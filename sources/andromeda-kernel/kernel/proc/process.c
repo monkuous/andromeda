@@ -78,7 +78,7 @@ static void pid_register(procent_t *ent) {
 }
 
 static void maybe_free_procent(procent_t *ent) {
-    if (!ent->has_process && !ent->has_group && !ent->has_session) {
+    if (!ent->has_thread && !ent->has_process && !ent->has_group && !ent->has_session) {
         size_t bucket = make_hash_int32(ent->id) & (proc_capacity - 1);
 
         if (ent->prev) ent->prev->next = ent->next;
@@ -88,6 +88,10 @@ static void maybe_free_procent(procent_t *ent) {
 
         proc_count -= 1;
     }
+}
+
+static inline procent_t *tent(thread_t *thread) {
+    return container(procent_t, thread, thread);
 }
 
 static inline procent_t *pent(process_t *process) {
@@ -108,6 +112,9 @@ void init_proc() {
     init_procent.has_group = true;
     init_procent.has_session = true;
 
+    init_procent.thread.state = THREAD_RUNNING;
+    init_procent.thread.process = &init_process;
+
     init_procent.process.group = &init_procent.group;
     init_procent.process.nrunning = 1;
     list_insert_tail(&init_procent.process.threads, &current->pnode);
@@ -118,6 +125,10 @@ void init_proc() {
     init_procent.session.members = 1;
 
     pid_register(&init_procent);
+}
+
+pid_t gettid() {
+    return tent(current)->id;
 }
 
 pid_t getpgid(pid_t pid) {
@@ -243,12 +254,8 @@ pid_t setsid() {
     return ent->id;
 }
 
-pid_t pfork(thread_t *thread) {
-    ASSERT(thread != current);
-    ASSERT(thread->state == THREAD_CREATED);
-
+pid_t pfork(thread_t **thread) {
     process_t *curp = current->process;
-    ASSERT(thread->process == curp);
 
     if (last_pid == INT_MAX) return -EAGAIN;
 
@@ -256,6 +263,7 @@ pid_t pfork(thread_t *thread) {
     memset(ent, 0, sizeof(*ent));
 
     ent->id = ++last_pid;
+    ent->has_thread = true;
     ent->has_process = true;
 
     ent->process.group = curp->group;
@@ -295,12 +303,31 @@ pid_t pfork(thread_t *thread) {
         else if (cur->file) file_ref(cur->file);
     }
 
-    thread->process = &ent->process;
-    list_remove(&curp->threads, &thread->pnode);
-    list_insert_tail(&ent->process.threads, &thread->pnode);
+    ent->thread.process = &ent->process;
+    list_insert_tail(&ent->process.threads, &ent->thread.pnode);
+    thread_create(&ent->thread, nullptr, nullptr);
 
     pid_register(ent);
 
+    *thread = &ent->thread;
+    return ent->id;
+}
+
+pid_t tfork(thread_t **thread) {
+    if (last_pid == INT_MAX) return -EAGAIN;
+
+    procent_t *ent = vmalloc(sizeof(*ent));
+    memset(ent, 0, sizeof(*ent));
+
+    ent->id = ++last_pid;
+    ent->has_thread = true;
+    ent->thread.process = current->process;
+    list_insert_tail(&current->process->threads, &ent->thread.pnode);
+    thread_create(&ent->thread, nullptr, nullptr);
+
+    pid_register(ent);
+
+    *thread = &ent->thread;
     return ent->id;
 }
 
@@ -507,6 +534,12 @@ void remove_thread_from_process(thread_t *thread) {
     if (list_is_empty(&proc->threads)) {
         make_zombie(proc);
     }
+}
+
+void free_thread_struct(thread_t *thread) {
+    procent_t *ent = tent(thread);
+    ent->has_thread = false;
+    maybe_free_procent(ent);
 }
 
 int getgroups(int gidsetsize, gid_t grouplist[]) {

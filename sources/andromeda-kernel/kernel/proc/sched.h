@@ -23,7 +23,6 @@ typedef enum {
 } wake_reason_t;
 
 typedef struct thread {
-    size_t references;
     list_node_t node;
     thread_state_t state;
     idt_frame_t regs;
@@ -53,6 +52,5 @@ void sched_interrupt(thread_t *thread); // Allowed to yield.
 void sched_unblock(thread_t *thread);   // Allowed to yield.
 
 // the thread will not run until sched_unblock is called on it
-thread_t *thread_create(thread_cont_t cont, void *ctx);
-void thread_ref(thread_t *thread);
-void thread_deref(thread_t *thread);
+void thread_create(thread_t *thread, thread_cont_t cont, void *ctx);
+void thread_free(thread_t *thread);
