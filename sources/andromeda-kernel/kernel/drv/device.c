@@ -70,9 +70,31 @@ int open_bdev(dev_t device, file_t *file, int flags) {
     return 0;
 }
 
+static int special_null_read(file_t *, void *, size_t *size, uint64_t, bool) {
+    *size = 0;
+    return 0;
+}
+
+static int special_null_write(file_t *, void *, size_t *, uint64_t, bool) {
+    return 0;
+}
+
+static const file_ops_t special_null_ops = {
+        .read = special_null_read,
+        .write = special_null_write,
+};
+
+static int open_special(uint32_t minor, file_t *file, int) {
+    switch (minor) {
+    case DRIVER_SPECIAL_NULL: file->ops = &special_null_ops; return 0;
+    default: return ENXIO;
+    }
+}
+
 int open_cdev(dev_t device, file_t *file, int flags) {
     switch (device >> 32) {
     case DRIVER_CONSOLE: return open_console(device, file, flags);
+    case DRIVER_SPECIAL: return open_special(device, file, flags);
     default: return ENXIO;
     }
 }
@@ -89,7 +111,7 @@ static int bdev_pgcache_read_page(pgcache_t *ptr, page_t *page, uint64_t idx) {
 }
 
 static const pgcache_ops_t bdev_pgcache_ops = {
-    .read_page = bdev_pgcache_read_page,
+        .read_page = bdev_pgcache_read_page,
 };
 
 void init_bdev_pgcache(bdev_t *dev) {

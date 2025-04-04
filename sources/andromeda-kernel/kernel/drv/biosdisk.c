@@ -131,7 +131,7 @@ static const bdev_ops_t bios_bdev_ops = {
         .read = biosdisk_read,
 };
 
-static bios_bdev_t *bios_drives;
+static bios_bdev_t **bios_drives;
 static size_t bios_drive_count;
 
 static void alloc_bounce_buf() {
@@ -148,7 +148,7 @@ static void alloc_bounce_buf() {
 static size_t create_drive() {
     size_t old_size = bios_drive_count * sizeof(*bios_drives);
     size_t new_size = old_size + sizeof(*bios_drives);
-    bios_bdev_t *buffer = vmalloc(new_size);
+    bios_bdev_t **buffer = vmalloc(new_size);
     memcpy(buffer, bios_drives, old_size);
     vmfree(bios_drives, old_size);
     bios_drives = buffer;
@@ -157,7 +157,8 @@ static size_t create_drive() {
 
 static bios_bdev_t *create_bdev(uint8_t id, uint64_t offset, uint64_t blocks, int block_shift) {
     size_t minor = create_drive();
-    bios_bdev_t *bdev = &bios_drives[minor];
+    bios_bdev_t *bdev = vmalloc(sizeof(*bdev));
+    bios_drives[minor] = bdev;
     memset(bdev, 0, sizeof(*bdev));
 
     bdev->base.ops = &bios_bdev_ops;
@@ -280,5 +281,5 @@ void init_biosdisk(uint8_t boot_drive, uint64_t boot_lba) {
 bdev_t *resolve_biosdisk(uint32_t id) {
     if (unlikely(id >= bios_drive_count)) return nullptr;
 
-    return &bios_drives[id].base;
+    return &bios_drives[id]->base;
 }

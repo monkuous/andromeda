@@ -42,6 +42,11 @@ static void mkdir_or_die(const char *path) {
     if (unlikely(error)) panic("failed to create %s (%d)", path, error);
 }
 
+static void mkchr_or_die(const char *path, mode_t mode, dev_t dev) {
+    int error = vfs_mknod(nullptr, path, strlen(path), S_IFCHR | mode, dev);
+    if (unlikely(error)) panic("failed to create %s (%d)", path, error);
+}
+
 // Mounts a ramfs on /, sets up cwd and umask, and creates some of the basic folder structure
 static void init_vfs() {
     hostname_len = 9;
@@ -67,6 +72,7 @@ static void init_vfs() {
     if (unlikely(error)) panic("failed to mount /dev (%d)", error);
 
     mkdir_or_die("/dev/volumes");
+    mkchr_or_die("/dev/null", 0666, DEVICE_ID(DRIVER_SPECIAL, DRIVER_SPECIAL_NULL));
 }
 
 static dev_t get_boot_volume() {
