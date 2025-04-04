@@ -285,7 +285,6 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
     if (self->flags & O_APPEND) offset = self->inode->size;
 
     size_t remaining = *size;
-    size_t total = 0;
 
     uint64_t end_offset = offset + remaining;
     if (unlikely(end_offset < offset)) end_offset = UINT64_MAX;
@@ -307,7 +306,7 @@ static int regular_write(file_t *self, void *buffer, size_t *size, uint64_t offs
     }
 
     if (update_pos) self->position = offset + remaining;
-    *size = total;
+    *size = remaining;
     return 0;
 }
 

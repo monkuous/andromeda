@@ -1,6 +1,9 @@
 #include "fs.h"
 #include "compiler.h"
+#include "drv/device.h"
+#include "fs/detect.h"
 #include "fs/fifo.h"
+#include "fs/ramfs.h"
 #include "fs/vfs.h"
 #include "mem/usermem.h"
 #include "mem/vmalloc.h"
@@ -10,6 +13,7 @@
 #include "string.h"
 #include "sys/syscall.h"
 #include "util/list.h"
+#include <bits/posix/stat.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -697,5 +701,89 @@ exit2:
     vmfree(dstbuf, dstlength);
 exit:
     vmfree(srcbuf, srclength);
+    return error;
+}
+
+int sys_MOUNT(int srcdirfd, uintptr_t srcpath, size_t srclength, int dirfd, uintptr_t path, size_t length) {
+    int error;
+
+    if (srclength) {
+        error = -verify_pointer(srcpath, srclength);
+        if (unlikely(error)) return error;
+    }
+
+    error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *srcbuf = srclength ? vmalloc(srclength) : nullptr;
+    error = -user_memcpy(srcbuf, (const void *)srcpath, srclength);
+    if (unlikely(error)) goto exit;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit2;
+
+    file_t *srcrel;
+
+    if (srclength) {
+        error = -get_at_file(&srcrel, srcdirfd);
+        if (unlikely(error)) goto exit2;
+    } else {
+        srcrel = nullptr;
+    }
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit3;
+
+    if (srclength) {
+        struct stat stat;
+        error = -vfs_stat(srcrel, srcbuf, srclength, &stat, 0);
+        if (unlikely(error)) goto exit4;
+
+        if (!S_ISBLK(stat.st_mode)) {
+            error = -ENOTBLK;
+            goto exit4;
+        }
+
+        bdev_t *bdev = resolve_bdev(stat.st_dev);
+        if (unlikely(!bdev)) {
+            error = -ENXIO;
+            goto exit4;
+        }
+
+        error = -vfs_mount(rel, buf, length, fsdetect, bdev);
+    } else {
+        struct ramfs_create_ctx ctx = {.mode = 0755};
+        error = -vfs_mount(rel, buf, length, ramfs_create, &ctx);
+    }
+
+exit4:
+    if (rel) file_deref(rel);
+exit3:
+    if (srcrel) file_deref(srcrel);
+exit2:
+    vmfree(buf, length);
+exit:
+    vmfree(srcbuf, srclength);
+    return error;
+}
+
+int sys_UMOUNT(int dirfd, uintptr_t path, size_t length) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_unmount(rel, buf, length);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
     return error;
 }

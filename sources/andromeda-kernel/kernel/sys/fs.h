@@ -34,3 +34,5 @@ ssize_t sys_PREAD(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32
 ssize_t sys_PWRITE(int fd, uintptr_t buf, ssize_t count, uint32_t off_low, uint32_t off_high);
 int sys_UNLINK(int dirfd, uintptr_t path, size_t length, int flags);
 int sys_RENAME(int srcdirfd, uintptr_t srcpath, size_t srclength, int dstdirfd, uintptr_t dstpath, size_t dstlength);
+int sys_MOUNT(int srcdirfd, uintptr_t srcpath, size_t srclength, int dirfd, uintptr_t path, size_t length);
+int sys_UMOUNT(int dirfd, uintptr_t path, size_t length);

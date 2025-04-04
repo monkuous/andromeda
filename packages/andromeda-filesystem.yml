@@ -12,7 +12,9 @@ packages:
           - '@THIS_COLLECT_DIR@/boot'
           - '@THIS_COLLECT_DIR@/dev'
           - '@THIS_COLLECT_DIR@/etc/skel'
+          - '@THIS_COLLECT_DIR@/mnt'
           - '@THIS_COLLECT_DIR@/root'
+          - '@THIS_COLLECT_DIR@/tmp'
           - '@THIS_COLLECT_DIR@/usr/bin'
           - '@THIS_COLLECT_DIR@/usr/lib'
       - args:
