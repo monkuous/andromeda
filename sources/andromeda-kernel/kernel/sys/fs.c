@@ -143,7 +143,9 @@ int sys_IOCTL(int fd, unsigned long request, uintptr_t arg) {
     int error = -fd_lookup(&file, fd);
     if (unlikely(error)) return error;
 
-    return vfs_ioctl(file, request, (void *)arg);
+    error = vfs_ioctl(file, request, (void *)arg);
+    file_deref(file);
+    return error;
 }
 
 int sys_FCNTL(int fd, int cmd, uintptr_t arg) {
@@ -213,7 +215,9 @@ int sys_FSTAT(int fd, uintptr_t buffer) {
     error = -fd_lookup(&file, fd);
     if (unlikely(error)) return error;
 
-    return -vfs_fstat(file, (struct stat *)buffer);
+    error = -vfs_fstat(file, (struct stat *)buffer);
+    file_deref(file);
+    return error;
 }
 
 typedef struct {

@@ -751,7 +751,13 @@ int vm_map(uintptr_t *addr, size_t size, int flags, int prot, file_t *file, uint
     return error;
 }
 
+static void alloc_extra(vm_region_t **ptr) {
+    *ptr = vmalloc(sizeof(**ptr));
+    memset(*ptr, 0, sizeof(**ptr));
+}
+
 static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t head, uintptr_t tail, int prot) {
+    vm_region_t *regions[2];
     vm_region_t *cur = get_next(vm, prev);
     size_t extra_regions = 0;
 
@@ -760,8 +766,8 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
         ASSERT(cur->head <= tail && cur->tail >= head);
 
         if (cur->prot != prot) {
-            if (cur->head < head) extra_regions += 1;
-            if (cur->tail > tail) extra_regions += 1;
+            if (cur->head < head) alloc_extra(&regions[extra_regions++]);
+            if (cur->tail > tail) alloc_extra(&regions[extra_regions++]);
 
             if (cur->src.inode && (cur->flags & MAP_SHARED) && (prot & ~cur->src.avail_prot)) return EACCES;
         }
@@ -770,8 +776,6 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
     }
 
     ASSERT(extra_regions <= 2);
-    vm_region_t *regions = vmalloc(sizeof(*regions) * 2);
-    memset(regions, 0, sizeof(*regions) * 2);
 
     cur = get_next(vm, prev);
 
@@ -790,51 +794,49 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
 
         if (cur->head < head && cur->tail > tail) {
             // Needs to be split into three
-            ASSERT(extra_regions >= 2);
+            ASSERT(extra_regions == 2);
             ASSERT(cur->node.prev == &prev->node);
             ASSERT(cur->node.next == &next->node);
 
-            regions[0].vm = vm;
-            regions[0].head = head;
-            regions[0].tail = tail;
-            regions[0].flags = cur->flags;
-            regions[0].prot = cur->prot;
-            regions[0].src = cur->src;
-            regions[0].offset = cur->offset + (head - cur->head);
+            regions[0]->vm = vm;
+            regions[0]->head = head;
+            regions[0]->tail = tail;
+            regions[0]->flags = cur->flags;
+            regions[0]->prot = cur->prot;
+            regions[0]->src = cur->src;
+            regions[0]->offset = cur->offset + (head - cur->head);
 
-            regions[1].vm = vm;
-            regions[1].head = tail + 1;
-            regions[1].tail = cur->tail;
-            regions[1].flags = cur->flags;
-            regions[1].prot = cur->prot;
-            regions[1].src = cur->src;
-            regions[1].offset = cur->offset + (tail + 1 - cur->head);
+            regions[1]->vm = vm;
+            regions[1]->head = tail + 1;
+            regions[1]->tail = cur->tail;
+            regions[1]->flags = cur->flags;
+            regions[1]->prot = cur->prot;
+            regions[1]->src = cur->src;
+            regions[1]->offset = cur->offset + (tail + 1 - cur->head);
 
             if (cur->src.inode) {
                 inode_ref(cur->src.inode);
                 inode_ref(cur->src.inode);
-                list_insert_tail(&cur->src.inode->data.mappings, &regions[0].snode);
-                list_insert_tail(&cur->src.inode->data.mappings, &regions[1].snode);
+                list_insert_tail(&cur->src.inode->data.mappings, &regions[0]->snode);
+                list_insert_tail(&cur->src.inode->data.mappings, &regions[1]->snode);
             }
 
             cur->tail = head - 1;
-            tree_add(vm, &regions[0]);
-            tree_add(vm, &regions[1]);
-            list_insert_after(&vm->regions, &cur->node, &regions[0].node);
-            list_insert_after(&vm->regions, &regions[0].node, &regions[1].node);
+            tree_add(vm, regions[0]);
+            tree_add(vm, regions[1]);
+            list_insert_after(&vm->regions, &cur->node, &regions[0]->node);
+            list_insert_after(&vm->regions, &regions[0]->node, &regions[1]->node);
 
-            region = &regions[0];
-            cur = &regions[1];
+            region = regions[0];
+            cur = regions[1];
 
-            regions += 2;
             extra_regions -= 2;
         } else if (cur->head < head) {
             // Needs to be split into two
             ASSERT(extra_regions >= 1);
             ASSERT(cur->node.prev == &prev->node);
 
-            region = regions++;
-            extra_regions--;
+            region = regions[--extra_regions];
 
             region->vm = vm;
             region->head = head;
@@ -858,8 +860,7 @@ static int do_remap(vm_t *vm, vm_region_t *prev, vm_region_t *next, uintptr_t he
             ASSERT(cur->node.next == &next->node);
 
             region = cur;
-            cur = regions++;
-            extra_regions--;
+            cur = regions[--extra_regions];
 
             cur->vm = vm;
             cur->head = tail + 1;

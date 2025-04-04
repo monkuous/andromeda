@@ -89,6 +89,7 @@ static void maybe_free_procent(procent_t *ent) {
         if (ent->next) ent->next->prev = ent->prev;
 
         proc_count -= 1;
+        vmfree(ent, sizeof(*ent));
     }
 }
 

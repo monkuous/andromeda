@@ -328,6 +328,13 @@ static size_t get_susp_off(uint8_t name_len, uint8_t skip) {
     return ((offsetof(full_dirent_t, common.name) + name_len + 1) & ~1) + skip;
 }
 
+static void rr_cleanup(struct rr_info *info) {
+    vmfree(info->nm.data, info->nm.length);
+    vmfree(info->sl.target, info->sl.length);
+    info->nm.length = 0;
+    info->sl.length = 0;
+}
+
 static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *out) {
     if (fs->rr_skip == 0xff) return 0;
 
@@ -484,6 +491,7 @@ static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *o
         vmfree(alloc_area, alloc_size);
         if (unlikely(error)) {
             vmfree(cur_su, su_size);
+            rr_cleanup(out);
             return error;
         }
 
@@ -493,10 +501,6 @@ static int get_rr_info(iso9660_fs_t *fs, full_dirent_t *entry, struct rr_info *o
 
     vmfree(alloc_area, alloc_size);
     return 0;
-}
-
-static void rr_cleanup(struct rr_info *info) {
-    vmfree(info->sl.target, info->sl.length);
 }
 
 static int dir_next(iso9660_fs_t *fs, iso9660_inode_t *inode, full_dirent_t *entry, uint64_t *offset) {
@@ -685,6 +689,7 @@ static int create_inode(
 
 static void iso9660_inode_free(inode_t *ptr) {
     iso9660_inode_t *self = (iso9660_inode_t *)ptr;
+    vmfree(self->extents, self->num_extents * sizeof(*self->extents));
     vmfree(self, sizeof(*self));
 }
 
@@ -834,6 +839,7 @@ static int try_dirent(iso9660_fs_t *fs, iso9660_inode_t *self, full_dirent_t *en
                 size,
                 &rr_info
         );
+        if (unlikely(error)) vmfree(extents, ext_count * sizeof(*extents));
     }
 
 exit:
@@ -1107,6 +1113,7 @@ int iso9660_create(fs_t **out, void *ctx) {
     );
     rr_cleanup(&rr_info);
     if (unlikely(error)) {
+        vmfree(extents, sizeof(*extents));
         vmfree(fs, sizeof(*fs));
         return error;
     }

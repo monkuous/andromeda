@@ -236,3 +236,6 @@ dentry_t *vfs_mount_bottom(dentry_t *entry);
 dentry_t *vfs_parent(dentry_t *entry);
 dentry_t *get_existing_dentry(dentry_t *parent, const void *name, size_t length);
 dentry_t *vfs_mount_top(dentry_t *entry);
+
+// logs the contents of the dentry cache, starting at the true root
+void dump_vfs_state();

@@ -13,6 +13,7 @@
 #include "util/hash.h"
 #include "util/list.h"
 #include "util/panic.h"
+#include "util/print.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -104,6 +105,8 @@ void dentry_deref(dentry_t *entry) {
 
             remove_dentry(entry);
             if (entry->inode) inode_deref(entry->inode);
+            vmfree(entry->name.data, entry->name.length);
+            vmfree(entry->children, sizeof(*entry->children) * entry->capacity);
             vmfree(entry, sizeof(*entry));
 
             if (!parent) break;
@@ -1064,11 +1067,13 @@ int vfs_mvmount(file_t *srel, const void *spath, size_t slen, file_t *drel, cons
         goto exit;
     }
 
+    dentry_t *old_mount = sentry->filesystem->mountpoint;
+
     sentry->filesystem->mountpoint->mounted_fs = nullptr;
     sentry->filesystem->mountpoint = dentry;
     dentry->mounted_fs = sentry->filesystem;
 
-    dentry_deref(sentry);
+    dentry_deref(old_mount);
     dentry_ref(dentry);
 
 exit:
@@ -1476,4 +1481,81 @@ dentry_t *get_existing_dentry(dentry_t *parent, const void *name, size_t length)
 dentry_t *vfs_mount_top(dentry_t *entry) {
     while (entry->mounted_fs) entry = entry->mounted_fs->root;
     return entry;
+}
+
+static void print_dent(dentry_t *entry, int level, size_t *total) {
+    for (int i = 0; i < level; i++) {
+        printk("  ");
+    }
+
+    if (entry->filesystem && !entry->parent) {
+        printk(">");
+    }
+
+    dentry_t *name_entry = entry;
+    while (!name_entry->parent && name_entry->filesystem) name_entry = name_entry->filesystem->mountpoint;
+
+    void *name;
+    size_t length;
+
+    if (name_entry != &root_dentry) {
+        name = name_entry->name.data;
+        length = name_entry->name.length;
+    } else {
+        name = "/";
+        length = 1;
+    }
+
+    printk("%S (%p, %u refs, inode = %p)\n", name, length, entry, entry->references, entry->inode);
+    *total += 1;
+}
+
+typedef enum {
+    DUMP_DESCENDING,
+    DUMP_ASCENDING_FROM_CHILD,
+    DUMP_ASCENDING_FROM_MOUNT,
+} dump_state_t;
+
+static void process_dent(dentry_t *entry, int level, size_t *total) {
+    dump_state_t state = DUMP_DESCENDING;
+
+    while (entry) {
+        if (state == DUMP_DESCENDING) {
+            print_dent(entry, level, total);
+
+            if (entry->child_list.first) {
+                entry = container(dentry_t, node, entry->child_list.first);
+                level++;
+                continue;
+            }
+
+            state = DUMP_ASCENDING_FROM_CHILD;
+        }
+
+        if (state == DUMP_ASCENDING_FROM_CHILD && entry->mounted_fs) {
+            state = DUMP_DESCENDING;
+            entry = entry->mounted_fs->root;
+            continue;
+        }
+
+        if (entry->node.next) {
+            state = DUMP_DESCENDING;
+            entry = container(dentry_t, node, entry->node.next);
+        } else if (entry->parent) {
+            state = DUMP_ASCENDING_FROM_CHILD;
+            entry = entry->parent;
+            level--;
+        } else if (entry->filesystem) {
+            state = DUMP_ASCENDING_FROM_MOUNT;
+            entry = entry->filesystem->mountpoint;
+        } else {
+            break;
+        }
+    }
+}
+
+void dump_vfs_state() {
+    size_t total = 0;
+    process_dent(&root_dentry, 0, &total);
+    printk("%u total\n", total);
 }
