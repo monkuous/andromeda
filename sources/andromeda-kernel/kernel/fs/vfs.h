@@ -55,6 +55,9 @@ struct dentry {
     list_t child_list;
     list_node_t node;
 
+    list_node_t lru_node;
+    list_node_t fs_node;
+
     fs_t *mounted_fs;
     inode_t *inode;
 };
@@ -92,6 +95,9 @@ struct fs {
     dentry_t *mountpoint;
     dentry_t *root;
     size_t indirect_refs; /* total dentry references + total inode references */
+    size_t implicit_refs; /* the number of references that are allowed at unmount */
+
+    list_t dentries;
 
     dev_t device;
     size_t id;
@@ -176,6 +182,9 @@ struct inode {
 };
 
 extern const file_ops_t fifo_ops;
+
+// returns true if any dentries were freed
+bool free_a_dentry();
 
 void dentry_ref(dentry_t *entry);
 void dentry_deref(dentry_t *entry);

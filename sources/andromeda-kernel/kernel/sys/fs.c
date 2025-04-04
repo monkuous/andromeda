@@ -94,7 +94,9 @@ exit:
     return ret;
 }
 
-off_t sys_SEEK(int fd, off_t offset, int whence) {
+off_t sys_SEEK(int fd, unsigned long offset_low, unsigned long offset_high, int whence) {
+    off_t offset = ((uint64_t)offset_high << 32) | offset_low;
+
     file_t *file;
     int error = -fd_lookup(&file, fd);
     if (unlikely(error)) return error;

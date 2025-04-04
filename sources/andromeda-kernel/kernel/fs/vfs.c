@@ -10,6 +10,7 @@
 #include "proc/process.h"
 #include "proc/sched.h"
 #include "string.h"
+#include "util/container.h"
 #include "util/hash.h"
 #include "util/list.h"
 #include "util/panic.h"
@@ -29,6 +30,48 @@
 static dentry_t root_dentry = {.references = 1};
 static fs_t anon_fs = {.device = DEVICE_ID(DRIVER_PSEUDO_FS, 0), .block_size = PAGE_SIZE, .max_name_len = NAME_MAX};
 static ino_t anon_ino = 1;
+
+static list_t dentry_lru;
+
+static void remove_dentry(dentry_t *entry) {
+    list_remove(&entry->filesystem->dentries, &entry->fs_node);
+    if (entry->inode) entry->filesystem->implicit_refs -= 1;
+
+    dentry_t *parent = entry->parent;
+    if (!parent) return;
+    entry->filesystem->implicit_refs -= 1; // for parent
+
+    size_t bucket = entry->name.hash & (parent->capacity - 1);
+
+    if (entry->prev) entry->prev->next = entry->next;
+    else parent->children[bucket] = entry->next;
+
+    if (entry->next) entry->next->prev = entry->prev;
+
+    parent->count -= 1;
+    if (entry->inode) parent->pcount -= 1;
+
+    list_remove(&parent->child_list, &entry->node);
+}
+
+static void free_dentry(dentry_t *entry) {
+    dentry_t *parent = entry->parent;
+
+    remove_dentry(entry);
+    if (entry->inode) inode_deref(entry->inode);
+    vmfree(entry->name.data, entry->name.length);
+    vmfree(entry->children, sizeof(*entry->children) * entry->capacity);
+    vmfree(entry, sizeof(*entry));
+
+    if (parent) dentry_deref(parent);
+}
+
+bool free_a_dentry() {
+    dentry_t *entry = container(dentry_t, lru_node, list_remove_head(&dentry_lru));
+    if (!entry) return false;
+    free_dentry(entry);
+    return true;
+}
 
 static void maybe_expand(dentry_t *entry) {
     if (entry->count < (entry->capacity - (entry->capacity / 4))) return;
@@ -60,7 +103,13 @@ static void maybe_expand(dentry_t *entry) {
 }
 
 static void insert_dentry(dentry_t *entry) {
+    list_insert_tail(&entry->filesystem->dentries, &entry->fs_node);
+    if (entry->inode) entry->filesystem->implicit_refs += 1;
+
     dentry_t *parent = entry->parent;
+    if (!parent) return;
+    entry->filesystem->implicit_refs += 1; // for parent
+
     maybe_expand(parent);
 
     size_t bucket = entry->name.hash & (parent->capacity - 1);
@@ -76,44 +125,19 @@ static void insert_dentry(dentry_t *entry) {
     list_insert_tail(&parent->child_list, &entry->node);
 }
 
-static void remove_dentry(dentry_t *entry) {
-    dentry_t *parent = entry->parent;
-    size_t bucket = entry->name.hash & (parent->capacity - 1);
-
-    if (entry->prev) entry->prev->next = entry->next;
-    else parent->children[bucket] = entry->next;
-
-    if (entry->next) entry->next->prev = entry->prev;
-
-    parent->count -= 1;
-    if (entry->inode) parent->pcount -= 1;
-
-    list_remove(&parent->child_list, &entry->node);
-}
-
 void dentry_ref(dentry_t *entry) {
-    entry->references += 1;
+    if (entry->references++ == 0) list_remove(&dentry_lru, &entry->lru_node);
     if (entry->filesystem) entry->filesystem->indirect_refs += 1;
 }
 
 void dentry_deref(dentry_t *entry) {
-    for (;;) {
-        if (entry->filesystem) entry->filesystem->indirect_refs -= 1;
-
-        if (--entry->references == 0) {
-            dentry_t *parent = entry->parent;
-
-            remove_dentry(entry);
-            if (entry->inode) inode_deref(entry->inode);
-            vmfree(entry->name.data, entry->name.length);
-            vmfree(entry->children, sizeof(*entry->children) * entry->capacity);
-            vmfree(entry, sizeof(*entry));
-
-            if (!parent) break;
-            entry = parent;
-        } else {
-            break;
-        }
+    if (entry->filesystem) entry->filesystem->indirect_refs -= 1;
+    if (--entry->references == 0) {
+        // TODO: Enable dentry caching by changing this back to list_insert_tail.
+        // This is not currently done because, without the ability to reclaim
+        // free memory owned by kmalloc, it would result in a giant memory leak.
+        //list_insert_tail(&dentry_lru, &entry->lru_node);
+        free_dentry(entry);
     }
 }
 
@@ -131,7 +155,7 @@ void file_deref(file_t *file) {
             }
 
             if (!access_file(file, W_OK)) {
-                if (!--file->inode->fifo.num_writers) fifo_no_readers(file->inode);
+                if (!--file->inode->fifo.num_writers) fifo_no_writers(file->inode);
             }
         }
 
@@ -165,6 +189,7 @@ void init_fs(fs_t *fs, inode_t *root) {
     static size_t next_id = 1;
 
     fs->indirect_refs += 1; /* fs->root */
+    fs->implicit_refs = 1;  /* fs->root */
     fs->id = next_id++;
 
     fs->root = vmalloc(sizeof(*fs->root));
@@ -173,6 +198,7 @@ void init_fs(fs_t *fs, inode_t *root) {
     fs->root->filesystem = fs;
     fs->root->inode = root;
 
+    insert_dentry(fs->root);
     inode_ref(root);
 }
 
@@ -495,6 +521,7 @@ static int simple_lookup(dentry_t *dir, const void *name, size_t length, dentry_
 
         dentry_ref(dir);
         insert_dentry(entry);
+        entry->filesystem->indirect_refs += 1;
     }
 
     *out = entry;
@@ -690,6 +717,7 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
         error = parent->inode->ops->directory.create(parent->inode, entry, mode, 0);
         if (unlikely(error)) goto exit;
 
+        entry->filesystem->implicit_refs += 1;
         parent->pcount += 1;
     } else {
         if (S_ISDIR(entry->inode->mode)) {
@@ -749,6 +777,7 @@ int vfs_mknod(file_t *rel, const void *path, size_t length, mode_t mode, dev_t d
     error = parent->inode->ops->directory.create(parent->inode, entry, mode, dev);
     if (unlikely(error)) goto exit;
 
+    entry->filesystem->implicit_refs += 1;
     parent->pcount += 1;
 exit:
     dentry_deref(entry);
@@ -769,6 +798,7 @@ int vfs_symlink(file_t *rel, const void *path, size_t length, const void *target
     error = parent->inode->ops->directory.symlink(parent->inode, entry, target, tlen);
     if (unlikely(error)) goto exit;
 
+    entry->filesystem->implicit_refs += 1;
     parent->pcount += 1;
 exit:
     dentry_deref(entry);
@@ -811,6 +841,7 @@ int vfs_link(file_t *rel, const void *path, size_t length, file_t *trel, const v
     error = parent->inode->ops->directory.mklink(parent->inode, entry, tentry->inode);
     if (unlikely(error)) goto exit;
 
+    entry->filesystem->implicit_refs += 1;
     parent->pcount += 1;
 exit:
     dentry_deref(tentry);
@@ -872,8 +903,8 @@ int vfs_unlink(file_t *rel, const void *path, size_t length, int flags) {
     error = parent->inode->ops->directory.unlink(parent->inode, entry);
     if (unlikely(error)) goto exit;
 
+    entry->filesystem->implicit_refs -= 1;
     parent->pcount -= 1;
-
 exit:
     dentry_deref(entry);
     return error;
@@ -964,7 +995,11 @@ int vfs_rename(file_t *rel, const void *path, size_t length, file_t *trel, const
 
     remove_dentry(src);
     remove_dentry(dst);
-    if (dst_inode) dparent->pcount -= 1;
+
+    if (dst_inode) {
+        dparent->pcount -= 1;
+        dparent->filesystem->implicit_refs -= 1;
+    }
 
     dname_t orig_name = src->name;
     src->parent = dparent;
@@ -1102,18 +1137,33 @@ int vfs_unmount(file_t *rel, const void *path, size_t length) {
 
     fs_t *fs = entry->filesystem;
 
-    /* 3 references are allowed: fs->root, fs->root->inode, and entry */
-    if (unlikely(fs->indirect_refs > 3)) {
+    /* one extra reference is allowed, for entry */
+    if (unlikely(fs->indirect_refs > fs->implicit_refs + 1)) {
         error = EBUSY;
         goto exit;
     }
 
+    dentry_t *cur = container(dentry_t, fs_node, fs->dentries.first);
+
+    while (cur) {
+        dentry_t *next = container(dentry_t, fs_node, cur->fs_node.next);
+
+        if (!cur->references) {
+            list_remove(&dentry_lru, &entry->lru_node);
+        } else {
+            fs->indirect_refs -= cur->references;
+        }
+
+        cur->parent = nullptr;
+        free_dentry(cur);
+
+        cur = next;
+    }
+
+    ASSERT(fs->indirect_refs == 0);
+
     fs->mountpoint->mounted_fs = nullptr;
     dentry_deref(fs->mountpoint);
-
-    dentry_deref(fs->root);
-    dentry_deref(entry);
-    ASSERT(fs->indirect_refs == 0);
     fs->ops->free(fs);
 
     return 0;

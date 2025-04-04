@@ -109,7 +109,7 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(FUTEX_WAKE, 1)
         SYSHANDLER32(FUTEX_WAIT, 5)
         SYSHANDLER32(OPEN, 5)
-        SYSHANDLER64(SEEK, 3)
+        SYSHANDLER64(SEEK, 4)
         SYSHANDLER32(READ, 3)
         SYSHANDLER32(CLOSE, 1)
         SYSHANDLER32(EXIT, 1)

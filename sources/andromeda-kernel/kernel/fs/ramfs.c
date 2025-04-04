@@ -152,11 +152,13 @@ static int ramfs_inode_dir_unlink(inode_t *self, dentry_t *entry) {
     entry->inode = nullptr;
 
     dentry_deref(entry); // allow it to be freed
+    entry->filesystem->implicit_refs -= 1;
     return 0;
 }
 
 static int ramfs_inode_dir_rename(inode_t *, dentry_t *, inode_t *dest, dentry_t *dest_entry) {
     // all the heavy lifting is done by the generic vfs code
+    if (!dest_entry->inode) return 0;
     return ramfs_inode_dir_unlink(dest, dest_entry);
 }
 
@@ -176,6 +178,7 @@ static int ramfs_inode_dir_create(inode_t *self, dentry_t *entry, mode_t mode, d
     }
 
     dentry_ref(entry); // keep it around
+    self->filesystem->implicit_refs += 1;
     return 0;
 }
 

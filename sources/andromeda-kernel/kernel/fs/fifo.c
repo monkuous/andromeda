@@ -256,14 +256,14 @@ static int fifo_write(file_t *self, void *buffer, size_t *size, uint64_t, bool) 
     return 0;
 }
 
-void fifo_no_readers(fifo_state_t *fifo) {
-    list_foreach(fifo->write_waiting, struct write_ctx, node, cur) {
+void fifo_no_readers(inode_t *inode) {
+    list_foreach(inode->fifo.write_waiting, struct write_ctx, node, cur) {
         sched_unblock(cur->thread);
     }
 }
 
-void fifo_no_writers(fifo_state_t *fifo) {
-    list_foreach(fifo->read_waiting, struct read_ctx, node, cur) {
+void fifo_no_writers(inode_t *inode) {
+    list_foreach(inode->fifo.read_waiting, struct read_ctx, node, cur) {
         sched_unblock(cur->thread);
     }
 }
