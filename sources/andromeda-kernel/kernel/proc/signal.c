@@ -68,6 +68,7 @@ typedef struct {
     uintptr_t a0;
     siginfo_t info;
     ucontext_t context;
+    struct _fpstate fpu;
     bool on_sigstack : 1;
 } sigctx_no_ra_t;
 
@@ -155,8 +156,9 @@ retry:
         ctx.rest.context.uc_mcontext.gregs[REG_EFL] = regs->eflags;
         ctx.rest.context.uc_mcontext.gregs[REG_UESP] = regs->esp;
         ctx.rest.context.uc_mcontext.gregs[REG_SS] = regs->ss;
+        ctx.rest.context.uc_mcontext.fpregs = (void *)(ctx_addr + offsetof(sigctx_t, rest.fpu));
 
-        asm volatile("fsave %0" : "+m"(ctx.rest.context.uc_mcontext.fpregs));
+        asm volatile("fsave %0" : "+m"(ctx.rest.fpu));
 
         memcpy(&ctx.rest.info, &sig->info, sizeof(sig->info));
 
@@ -264,7 +266,7 @@ int return_from_signal() {
     regs->ss = ctx.context.uc_mcontext.gregs[REG_SS];
     regs->vector = 0;
 
-    asm("frstor %0" ::"m"(ctx.context.uc_mcontext.fpregs));
+    asm("frstor %0" ::"m"(ctx.fpu));
 
     if (ctx.on_sigstack) {
         current->sigstack.ss_flags &= ~SS_ONSTACK;
