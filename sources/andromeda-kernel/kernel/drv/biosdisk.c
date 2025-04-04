@@ -205,7 +205,7 @@ static void bios_part_discover_cb(uint64_t lba, uint64_t size, const void *id, s
     vmfree(link_path, link_len);
     if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
 
-    if (ctx->boot_lba != UINT64_MAX && ctx->boot_lba != 0 && ctx->boot_lba == lba) {
+    if (ctx->boot_lba != UINT64_MAX && ctx->boot_lba != 0 && ctx->boot_lba == bdev->lba0) {
         error = vfs_symlink(nullptr, "/dev/bootvol", 12, name, name_length);
         if (unlikely(error)) panic("biosdisk: symlink failed (%d)", error);
     }

@@ -61,9 +61,6 @@ static int discover_mbr(bdev_t *bdev, const void *name, size_t length, part_cb_t
         if (chs0 > chs1) return 0;
 
         if (!partition->nlba) return 0;
-
-        uint64_t end = partition->lba0 + ((uint64_t)partition->nlba - 1);
-        if (end >= bdev->blocks) return 0;
     }
 
     // create id-based symlink
@@ -85,7 +82,7 @@ static int discover_mbr(bdev_t *bdev, const void *name, size_t length, part_cb_t
         if (!partition->type) continue;
 
         unsigned char cur_id[16];
-        size_t cur_id_length = snprintk(cur_id, sizeof(cur_id), "%S-%d",  id, id_length, i);
+        size_t cur_id_length = snprintk(cur_id, sizeof(cur_id), "%S-%d", id, id_length, i);
         ASSERT(cur_id_length <= sizeof(cur_id));
 
         cb(partition->lba0, partition->nlba, cur_id, cur_id_length, ctx);
