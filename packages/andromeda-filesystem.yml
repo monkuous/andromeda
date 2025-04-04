@@ -31,6 +31,7 @@ packages:
           - '@THIS_COLLECT_DIR@'
       - args:
           - 'cp'
+          - '@THIS_SOURCE_DIR@/fstab'
           - '@THIS_SOURCE_DIR@/group'
           - '@THIS_SOURCE_DIR@/passwd'
           - '@THIS_SOURCE_DIR@/profile'

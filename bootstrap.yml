@@ -37,6 +37,7 @@ imports:
   - file: packages/andromeda-filesystem.yml
   - file: packages/andromeda-init.yml
   - file: packages/andromeda-kernel.yml
+  - file: packages/andromeda-util.yml
   - file: packages/andromeda.yml
   - file: packages/autoconf.yml
   - file: packages/automake.yml

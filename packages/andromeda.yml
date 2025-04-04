@@ -7,5 +7,6 @@ packages:
     pkgs_required:
       - andromeda-init
       - andromeda-kernel
+      - andromeda-util
       - bash
       - coreutils

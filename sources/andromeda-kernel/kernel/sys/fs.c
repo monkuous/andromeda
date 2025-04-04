@@ -752,7 +752,7 @@ int sys_MOUNT(int srcdirfd, uintptr_t srcpath, size_t srclength, int dirfd, uint
             goto exit4;
         }
 
-        bdev_t *bdev = resolve_bdev(stat.st_dev);
+        bdev_t *bdev = resolve_bdev(stat.st_rdev);
         if (unlikely(!bdev)) {
             error = -ENXIO;
             goto exit4;
