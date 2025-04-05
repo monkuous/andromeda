@@ -8,7 +8,6 @@
 #include "fs/detect.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
-#include "init/bios.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
 #include "mem/vmalloc.h"
@@ -25,17 +24,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-static void init_video() {
-    // ensure video mode is 3 (80x25 color text)
-    regs_t regs = {.eax = 0xf00};
-    intcall(0x10, &regs);
-
-    if ((regs.eax & 0xff) != 3) {
-        regs = (regs_t){.eax = 3};
-        intcall(0x10, &regs);
-    }
-}
 
 static void mkdir_or_die(const char *path) {
     int error = vfs_mknod(nullptr, path, strlen(path), S_IFDIR | 0755, 0);
@@ -152,6 +140,7 @@ static void chroot_to_initrd() {
     if (unlikely(error)) panic("failed to open %S (%d)", init_name.data, init_name.length, error);
 
     print_set_console(false);
+    console_set_cursor(true);
     error = execute(file, &init_name, 1, environment, sizeof(environment) / sizeof(*environment), false);
     file_deref(file);
     if (unlikely(error)) panic("failed to start init process (%d)", error);
@@ -163,10 +152,10 @@ static void chroot_to_initrd() {
 [[noreturn, gnu::used]] void kernel_main(uint64_t boot_lba, uint8_t boot_drive) {
     init_gdt();
     init_idt();
-    init_video();
-    printk("\nStarting Andromeda...\n\n");
     detect_memory();
     bootmem_handover();
+    init_console_early();
+    printk("\nStarting Andromeda...\n\n");
     init_proc();
     init_vfs();
     init_console();
