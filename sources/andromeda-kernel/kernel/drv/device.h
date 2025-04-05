@@ -14,6 +14,7 @@
 
 #define DRIVER_SPECIAL_NULL 0
 #define DRIVER_SPECIAL_MEM 1
+#define DRIVER_SPECIAL_CPU 2
 
 #define DEVICE_ID(driver, id) (((dev_t)(driver) << 32) | (id))
 

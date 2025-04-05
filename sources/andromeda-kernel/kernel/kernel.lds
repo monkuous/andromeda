@@ -3,15 +3,16 @@ OUTPUT_ARCH(i386)
 OUTPUT_FORMAT(elf32-i386)
 
 PHDRS {
-    init PT_LOAD FLAGS(5);
+    phys PT_LOAD FLAGS(5);
     text PT_LOAD FLAGS(5);
     data PT_LOAD FLAGS(6);
 }
 
 SECTIONS {
     . = 0x8000;
-    .text.init : { *(.text.init) } :init
+    .text.init : { *(.text.init) } :phys
     ASSERT(. <= 0x10000, ".text.init too large")
+    .text.phys : { *(.text.phys) } :phys
 
     . += __kern_virt_base;
     .text : AT(ADDR(.text) - __kern_virt_base) { *(.text .text.* .rodata .rodata.*) } :text

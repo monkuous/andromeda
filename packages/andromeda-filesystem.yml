@@ -11,7 +11,6 @@ packages:
           - '-p'
           - '@THIS_COLLECT_DIR@/boot'
           - '@THIS_COLLECT_DIR@/dev'
-          - '@THIS_COLLECT_DIR@/etc/skel'
           - '@THIS_COLLECT_DIR@/mnt'
           - '@THIS_COLLECT_DIR@/root'
           - '@THIS_COLLECT_DIR@/tmp'
@@ -36,11 +35,6 @@ packages:
           - '@THIS_SOURCE_DIR@/passwd'
           - '@THIS_SOURCE_DIR@/profile'
           - '@THIS_COLLECT_DIR@/etc'
-      - args:
-          - 'cp'
-          - '@THIS_SOURCE_DIR@/.bash_profile'
-          - '@THIS_SOURCE_DIR@/.bashrc'
-          - '@THIS_COLLECT_DIR@/etc/skel'
       - args:
           - 'cp'
           - '@THIS_SOURCE_DIR@/.bash_profile'

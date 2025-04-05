@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "drv/biosdisk.h"
 #include "drv/console.h"
+#include "drv/cpu.h"
 #include "drv/loopback.h"
 #include "drv/mem.h"
 #include "fs/pgcache.h"
@@ -89,6 +90,7 @@ static int open_special(uint32_t minor, file_t *file, int flags) {
     switch (minor) {
     case DRIVER_SPECIAL_NULL: file->ops = &special_null_ops; return 0;
     case DRIVER_SPECIAL_MEM: return open_dev_mem(file, flags);
+    case DRIVER_SPECIAL_CPU: return open_dev_cpu(file, flags);
     default: return ENXIO;
     }
 }

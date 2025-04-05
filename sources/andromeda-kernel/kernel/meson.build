@@ -16,6 +16,8 @@ kernel_elf = executable(
     'cpu/idt.S',
     'drv/biosdisk.c',
     'drv/console.c',
+    'drv/cpu.c',
+    'drv/cpu.S',
     'drv/device.c',
     'drv/idle.c',
     'drv/loopback.c',

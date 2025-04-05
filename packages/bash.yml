@@ -31,3 +31,4 @@ packages:
     build:
       - args: ['make', '-j@PARALLELISM@']
       - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
+      - args: ['ln', '-sf', 'bash', '@THIS_COLLECT_DIR@/usr/bin/sh']

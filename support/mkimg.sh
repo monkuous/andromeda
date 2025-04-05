@@ -22,4 +22,5 @@ EOF
 # 512 byte sectors, partition starts at 2048 sectors
 mformat -F -B pkg-builds/andromeda-kernel/bcode/fat32.bin -S 2 -H 2048 p:
 mcopy -spm "$3/boot"/* p:/
-xorriso -as mkisofs -R -r -uid 0 -gid 0 "$3" | mcopy - p:/andromed.img
+
+"$(dirname "$(readlink -f -- "$0")")/mkinitrd.sh" system-root | mcopy - p:/andromed.img

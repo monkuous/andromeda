@@ -18,7 +18,7 @@ tasks:
   - name: make-image
     pkgs_required:
       - andromeda
-    args: ['@SOURCE_ROOT@/support/mkimg.sh', '@BUILD_ROOT@/andromeda.img', '128', '@SYSROOT_DIR@']
+    args: ['@SOURCE_ROOT@/support/mkimg.sh', '@BUILD_ROOT@/andromeda.img', '256', '@SYSROOT_DIR@']
     workdir: '@BUILD_ROOT@'
   - name: qemu-kvm
     tasks_required:
@@ -34,6 +34,7 @@ tasks:
     workdir: '@BUILD_ROOT@'
 
 imports:
+  - file: packages/andromeda-boot.yml
   - file: packages/andromeda-filesystem.yml
   - file: packages/andromeda-init.yml
   - file: packages/andromeda-kernel.yml
