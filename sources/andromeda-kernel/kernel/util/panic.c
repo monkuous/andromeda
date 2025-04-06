@@ -1,5 +1,4 @@
 #include "panic.h"
-#include "drv/console.h"
 #include "init/bios.h"
 #include "util/print.h"
 #include "util/reset.h"
@@ -16,7 +15,6 @@
         intcall(0x16, &regs);
     }
 
-    console_set_cursor(false);
     print_set_console(true);
 
     va_list args;

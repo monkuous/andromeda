@@ -11,6 +11,7 @@ packages:
           - '-p'
           - '@THIS_COLLECT_DIR@/boot'
           - '@THIS_COLLECT_DIR@/dev'
+          - '@THIS_COLLECT_DIR@/etc'
           - '@THIS_COLLECT_DIR@/mnt'
           - '@THIS_COLLECT_DIR@/root'
           - '@THIS_COLLECT_DIR@/tmp'

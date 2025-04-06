@@ -131,6 +131,7 @@ static void chroot_to_initrd() {
     static const andromeda_tagged_string_t init_name = {"/sbin/init", 10};
     static const andromeda_tagged_string_t environment[] = {
             {"HOME=/root", 10},
+            {"TERM=linux", 10},
     };
 
     printk("kernel: starting init process\n");
@@ -140,7 +141,6 @@ static void chroot_to_initrd() {
     if (unlikely(error)) panic("failed to open %S (%d)", init_name.data, init_name.length, error);
 
     print_set_console(false);
-    console_set_cursor(true);
     error = execute(file, &init_name, 1, environment, sizeof(environment) / sizeof(*environment), false);
     file_deref(file);
     if (unlikely(error)) panic("failed to start init process (%d)", error);

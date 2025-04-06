@@ -1,5 +1,6 @@
 #include "print.h"
 #include "drv/console.h"
+#include "drv/console/screen.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/panic.h"
@@ -143,6 +144,7 @@ static void term_sink(const void *buf, size_t size, void *) {
 
 void vprintk(const char *format, va_list args) {
     do_printk(term_sink, nullptr, format, args);
+    screen_flush();
 }
 
 void printk(const char *format, ...) {

@@ -5,7 +5,6 @@
 
 void init_console_early();
 void init_console();
-void console_set_cursor(bool cursor);
 
 int open_console(uint32_t minor, file_t *file, int flags);
 
