@@ -23,6 +23,8 @@ void send_signal(process_t *process, thread_t *thread, siginfo_t *info, bool for
 void trigger_signals();
 void cleanup_signals(signal_target_t *target);
 
+bool is_masked_or_ignored(unsigned sig);
+
 int return_from_signal();
 
 void sigset_sanitize(sigset_t *set);

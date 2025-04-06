@@ -49,13 +49,8 @@ static unsigned esc_nparam;
 
 #define DEFAULT_MODE (MODE_AUTO_REPEAT | MODE_AUTO_WRAP | MODE_CURSOR_VISIBLE)
 
-typedef struct {
-    unsigned x, y;
-    uint16_t attributes;
-    bool reverse_colors : 1;
-} vt_state_t;
-
-static vt_state_t state, saved_state;
+vt_state_t vt_state;
+static vt_state_t saved_state;
 static unsigned mode;
 static unsigned base_y, base_height;
 static unsigned scroll_y0, scroll_y1;
@@ -66,7 +61,7 @@ static bool have_repeat_control;
 static void inject_input(const void *, size_t);
 
 static uint16_t cp_to_val(uint32_t cp) {
-    return state.attributes | screen_map_unicode(cp);
+    return vt_state.attributes | screen_map_unicode(cp);
 }
 
 static uint16_t do_reverse(uint16_t val) {
@@ -103,7 +98,7 @@ static void update_mode(unsigned new_mode) {
     unsigned old_mode = mode;
     mode = new_mode;
 
-    state.reverse_colors = new_mode & MODE_REVERSE_VIDEO;
+    vt_state.reverse_colors = new_mode & MODE_REVERSE_VIDEO;
 
     if ((old_mode & MODE_REVERSE_VIDEO) != (new_mode & MODE_REVERSE_VIDEO)) {
         for (unsigned y = 0; y < SCREEN_HEIGHT; y++) {
@@ -122,7 +117,7 @@ static void update_mode(unsigned new_mode) {
             base_height = SCREEN_HEIGHT;
         }
 
-        state.x = state.y = 0;
+        vt_state.x = vt_state.y = 0;
     }
 
     if ((old_mode & MODE_AUTO_REPEAT) != (new_mode & MODE_AUTO_REPEAT)) {
@@ -131,9 +126,9 @@ static void update_mode(unsigned new_mode) {
 }
 
 static void maybe_scroll() {
-    if (state.y + base_y >= scroll_y1) {
-        ASSERT(state.y + base_y == scroll_y1);
-        state.y -= 1;
+    if (vt_state.y + base_y >= scroll_y1) {
+        ASSERT(vt_state.y + base_y == scroll_y1);
+        vt_state.y -= 1;
 
         uint16_t val = cp_to_val(BLANK_CHAR);
 
@@ -150,8 +145,8 @@ static void maybe_scroll() {
 }
 
 static void emit_lf() {
-    if (mode & MODE_AUTO_CR) state.x = 0;
-    state.y += 1;
+    if (mode & MODE_AUTO_CR) vt_state.x = 0;
+    vt_state.y += 1;
     maybe_scroll();
 }
 
@@ -168,15 +163,15 @@ static void inject_id() {
 }
 
 static void save_state() {
-    saved_state = state;
+    saved_state = vt_state;
 }
 
 static void restore_state() {
-    state = saved_state;
+    vt_state = saved_state;
 
     unsigned m = mode;
 
-    if (state.reverse_colors) m |= MODE_REVERSE_VIDEO;
+    if (vt_state.reverse_colors) m |= MODE_REVERSE_VIDEO;
     else m &= ~MODE_REVERSE_VIDEO;
 
     update_mode(m);
@@ -189,9 +184,9 @@ static void process_esc_init(uint32_t cp) {
     case 'c': vt_reset(); break;
     case 'D':
     case 'E': emit_lf(); break;
-    case 'H': set_tab_stop(state.x); break;
+    case 'H': set_tab_stop(vt_state.x); break;
     case 'M':
-        if (state.y > 0) state.y -= 1;
+        if (vt_state.y > 0) vt_state.y -= 1;
         break;
     case 'Z': inject_id(); break;
     case '7': save_state(); break;
@@ -226,7 +221,7 @@ static void process_esc_align_test(uint32_t cp) {
     case '8':
         for (int y = 0; y < SCREEN_HEIGHT; y++) {
             for (int x = 0; x < SCREEN_WIDTH; x++) {
-                do_set_char(x, y, state.attributes | 'E');
+                do_set_char(x, y, vt_state.attributes | 'E');
             }
         }
         break;
@@ -328,22 +323,22 @@ static unsigned clamp(unsigned val, unsigned min, unsigned max) {
 }
 
 static void insert_chars(uint32_t cp, unsigned count) {
-    unsigned avail = SCREEN_WIDTH - state.x;
+    unsigned avail = SCREEN_WIDTH - vt_state.x;
     if (count > avail) count = avail;
 
     uint16_t val = cp_to_val(cp);
     unsigned rem = avail - count;
 
     unsigned i;
-    unsigned x = state.x;
+    unsigned x = vt_state.x;
 
     for (i = 0; i < rem; i++, x++) {
-        screen_set_char(x + count, state.y + base_y, screen_get_char(x, state.y));
-        if (i < count) do_set_char(x, state.y + base_y, val);
+        screen_set_char(x + count, vt_state.y + base_y, screen_get_char(x, vt_state.y));
+        if (i < count) do_set_char(x, vt_state.y + base_y, val);
     }
 
     for (; i < count; i++, x++) {
-        do_set_char(x, state.y + base_y, val);
+        do_set_char(x, vt_state.y + base_y, val);
     }
 }
 
@@ -368,9 +363,9 @@ static void erase_screen(unsigned type) {
 
     switch (type) {
     case 0: {
-        unsigned x = state.x;
+        unsigned x = vt_state.x;
 
-        for (unsigned y = state.y + base_y; y < SCREEN_HEIGHT; y++) {
+        for (unsigned y = vt_state.y + base_y; y < SCREEN_HEIGHT; y++) {
             for (; x < SCREEN_WIDTH; x++) {
                 do_set_char(x, y, val);
             }
@@ -380,14 +375,14 @@ static void erase_screen(unsigned type) {
         break;
     }
     case 1:
-        for (unsigned y = 0; y < state.y + base_y; y++) {
+        for (unsigned y = 0; y < vt_state.y + base_y; y++) {
             for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
                 do_set_char(x, y, val);
             }
         }
 
-        for (unsigned x = 0; x < state.x; x++) {
-            do_set_char(x, state.y, val);
+        for (unsigned x = 0; x < vt_state.x; x++) {
+            do_set_char(x, vt_state.y, val);
         }
         break;
     case 2:
@@ -407,23 +402,23 @@ static void erase_line(unsigned type) {
 
     uint16_t val = cp_to_val(BLANK_CHAR);
 
-    unsigned x = type == 0 ? state.x : 0;
-    unsigned max = type != 0 ? state.x : SCREEN_WIDTH;
+    unsigned x = type == 0 ? vt_state.x : 0;
+    unsigned max = type != 0 ? vt_state.x : SCREEN_WIDTH;
 
     for (; x < max; x++) {
-        do_set_char(x, state.y + base_y, val);
+        do_set_char(x, vt_state.y + base_y, val);
     }
 }
 
 static void insert_lines(unsigned count) {
-    unsigned avail = base_height - state.y;
+    unsigned avail = base_height - vt_state.y;
     if (avail > count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
 
     unsigned i;
-    unsigned y = state.y + base_y;
+    unsigned y = vt_state.y + base_y;
 
     for (i = 0; i < rem; i++, y++) {
         for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
@@ -440,14 +435,14 @@ static void insert_lines(unsigned count) {
 }
 
 static void delete_lines(unsigned count) {
-    unsigned avail = base_height - state.y;
+    unsigned avail = base_height - vt_state.y;
     if (avail > count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
 
     unsigned i;
-    unsigned y = state.y + base_y;
+    unsigned y = vt_state.y + base_y;
 
     for (i = 0; i < rem; i++, y++) {
         for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
@@ -464,40 +459,40 @@ static void delete_lines(unsigned count) {
 }
 
 static void delete_chars(unsigned count) {
-    unsigned avail = SCREEN_WIDTH - state.x;
+    unsigned avail = SCREEN_WIDTH - vt_state.x;
     if (avail > count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
 
     unsigned i;
-    unsigned x = state.x;
+    unsigned x = vt_state.x;
 
     for (i = 0; i < rem; i++, x++) {
-        if (i < count) screen_set_char(x, state.y + base_y, screen_get_char(x + count, state.y + base_y));
-        do_set_char(x + count, state.y + base_y, val);
+        if (i < count) screen_set_char(x, vt_state.y + base_y, screen_get_char(x + count, vt_state.y + base_y));
+        do_set_char(x + count, vt_state.y + base_y, val);
     }
 
     for (; i < count; i++, x++) {
-        do_set_char(x, state.y + base_y, val);
+        do_set_char(x, vt_state.y + base_y, val);
     }
 }
 
 static void erase_chars(unsigned count) {
-    unsigned avail = SCREEN_WIDTH - state.x;
+    unsigned avail = SCREEN_WIDTH - vt_state.x;
     if (avail > count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
-    unsigned x = state.x;
+    unsigned x = vt_state.x;
 
     for (unsigned i = 0; i < count; i++, x++) {
-        do_set_char(x, state.y + base_y, val);
+        do_set_char(x, vt_state.y + base_y, val);
     }
 }
 
 static void remove_tab_stops(unsigned type) {
     switch (type) {
-    case 0: clear_tab_stop(state.x); break;
+    case 0: clear_tab_stop(vt_state.x); break;
     case 3: memset(tab_stops, 0, sizeof(tab_stops)); break;
     default: return;
     }
@@ -518,8 +513,8 @@ static unsigned get_mode_mask() {
     return mask;
 }
 
-#define SET_FG(x) state.attributes = (state.attributes & 0xf000) | ((x) << 8)
-#define SET_BG(x) state.attributes = (state.attributes & 0x0f00) | ((x) << 12)
+#define SET_FG(x) vt_state.attributes = (vt_state.attributes & 0xf000) | ((x) << 8)
+#define SET_BG(x) vt_state.attributes = (vt_state.attributes & 0x0f00) | ((x) << 12)
 
 static bool col256_to_rgb(unsigned value, uint8_t out[3]) {
     ASSERT(value >= 16);
@@ -539,7 +534,7 @@ static bool col256_to_rgb(unsigned value, uint8_t out[3]) {
         out[0] = red;
         out[1] = green;
         out[2] = blue;
-        
+
         return true;
     }
 
@@ -629,7 +624,7 @@ static void set_attributes() {
         unsigned param = get_esc_param(i, 0);
 
         switch (get_esc_param(i, 0)) {
-        case 0: state.attributes = DEFAULT_ATTR; break;
+        case 0: vt_state.attributes = DEFAULT_ATTR; break;
         case 30 ... 37: SET_FG(color_to_out(param - 30)); break;
         case 38: {
             int color = colext_to_out(&i);
@@ -657,7 +652,7 @@ static void report_info(unsigned type) {
     case 5: inject_input("\x1b[0n", 4); break;
     case 6: {
         unsigned char buf[32];
-        size_t length = snprintk(buf, sizeof(buf), "\x1b[%u;%uR", state.x + 1, state.y + 1);
+        size_t length = snprintk(buf, sizeof(buf), "\x1b[%u;%uR", vt_state.x + 1, vt_state.y + 1);
         ASSERT(length <= sizeof(buf));
         inject_input(buf, length);
         break;
@@ -681,8 +676,8 @@ static void set_scroll_region(unsigned y0, unsigned y1) {
 
     scroll_y0 = y0;
     scroll_y1 = y1 + 1;
-    state.x = 0;
-    state.y = 0;
+    vt_state.x = 0;
+    vt_state.y = 0;
 
     if (mode & MODE_SCROLL_RELATIVE) {
         base_y = scroll_y0;
@@ -692,7 +687,7 @@ static void set_scroll_region(unsigned y0, unsigned y1) {
 
 static void process_linux_command(unsigned type) {
     switch (type) {
-    case 8: state.attributes = DEFAULT_ATTR; return;
+    case 8: vt_state.attributes = DEFAULT_ATTR; return;
     default: return;
     }
 }
@@ -702,18 +697,18 @@ static void process_esc_csi(uint32_t cp) {
 
     switch (cp) {
     case '@': return insert_chars(BLANK_CHAR, get_esc_param(0, 1));
-    case 'A': return incr_coord(&state.y, base_height, -(int)get_esc_param(0, 1));
+    case 'A': return incr_coord(&vt_state.y, base_height, -(int)get_esc_param(0, 1));
     case 'e':
-    case 'B': return incr_coord(&state.y, base_height, get_esc_param(0, 1));
+    case 'B': return incr_coord(&vt_state.y, base_height, get_esc_param(0, 1));
     case 'a':
-    case 'C': return incr_coord(&state.x, SCREEN_WIDTH, get_esc_param(0, 1));
-    case 'D': return incr_coord(&state.x, SCREEN_WIDTH, -(int)get_esc_param(0, 1));
-    case 'E': state.x = 0; return incr_coord(&state.y, base_height, get_esc_param(0, 1));
-    case 'F': state.x = 0; return incr_coord(&state.y, base_height, -(int)get_esc_param(0, 1));
+    case 'C': return incr_coord(&vt_state.x, SCREEN_WIDTH, get_esc_param(0, 1));
+    case 'D': return incr_coord(&vt_state.x, SCREEN_WIDTH, -(int)get_esc_param(0, 1));
+    case 'E': vt_state.x = 0; return incr_coord(&vt_state.y, base_height, get_esc_param(0, 1));
+    case 'F': vt_state.x = 0; return incr_coord(&vt_state.y, base_height, -(int)get_esc_param(0, 1));
     case 'f':
-    case 'H': state.y = clamp(get_esc_param(1, 1), 1, base_height) - 1; // fall through
+    case 'H': vt_state.y = clamp(get_esc_param(1, 1), 1, base_height) - 1; // fall through
     case '`':
-    case 'G': state.x = clamp(get_esc_param(0, 1), 1, SCREEN_WIDTH) - 1; return;
+    case 'G': vt_state.x = clamp(get_esc_param(0, 1), 1, SCREEN_WIDTH) - 1; return;
     case 'J': return erase_screen(get_esc_param(0, 0));
     case 'K': return erase_line(get_esc_param(0, 0));
     case 'L': return insert_lines(get_esc_param(0, 1));
@@ -721,7 +716,7 @@ static void process_esc_csi(uint32_t cp) {
     case 'P': return delete_chars(get_esc_param(0, 1));
     case 'X': return erase_chars(get_esc_param(0, 1));
     case 'c': return inject_id();
-    case 'd': state.y = clamp(get_esc_param(0, 1), 1, base_height) - 1; return;
+    case 'd': vt_state.y = clamp(get_esc_param(0, 1), 1, base_height) - 1; return;
     case 'g': return remove_tab_stops(get_esc_param(0, 0));
     case 'h': return update_mode(mode | get_mode_mask());
     case 'l': return update_mode(mode & ~get_mode_mask());
@@ -794,31 +789,32 @@ static void process_escape(uint32_t cp) {
 static void do_write_cp(uint32_t cp) {
     // Check for control codes
     switch (cp) {
+    case 0: return;
     case 0x07: return; // TODO: Beep
     case 0x08:
-        if (state.x > 0) state.x -= 1;
+        if (vt_state.x > 0) vt_state.x -= 1;
         return;
     case 0x09: {
-        state.x++; /* if already at a tab stop, skip it */
-        unsigned idx = state.x / 32;
-        unsigned off = state.x % 32;
+        vt_state.x++; /* if already at a tab stop, skip it */
+        unsigned idx = vt_state.x / 32;
+        unsigned off = vt_state.x % 32;
 
         for (; idx < sizeof(tab_stops) / sizeof(*tab_stops); idx++, off = 0) {
             unsigned j = __builtin_ffs(tab_stops[idx] >> off);
 
             if (j) {
-                state.x = idx * 32 + off + (j - 1);
+                vt_state.x = idx * 32 + off + (j - 1);
                 return;
             }
         }
 
-        state.x = SCREEN_WIDTH - 1;
+        vt_state.x = SCREEN_WIDTH - 1;
         return;
     }
     case 0x0a:
     case 0x0b:
     case 0x0c: emit_lf(); return;
-    case 0x0d: state.x = 0; return;
+    case 0x0d: vt_state.x = 0; return;
     case 0x0e: return; // TODO: Activate charset G1
     case 0x0f: return; // TODO: Activate charset G0
     case 0x18:
@@ -835,22 +831,22 @@ static void do_write_cp(uint32_t cp) {
 
     if (cp < 0x20) return;
 
-    do_set_char(state.x++, state.y + base_y, cp_to_val(cp));
+    do_set_char(vt_state.x++, vt_state.y + base_y, cp_to_val(cp));
 
-    if (state.x >= SCREEN_WIDTH) {
+    if (vt_state.x >= SCREEN_WIDTH) {
         if (mode & MODE_AUTO_WRAP) {
-            state.x = 0;
-            state.y += 1;
+            vt_state.x = 0;
+            vt_state.y += 1;
             maybe_scroll();
         } else {
-            state.x = SCREEN_WIDTH - 1;
+            vt_state.x = SCREEN_WIDTH - 1;
         }
     }
 }
 
 static void update_cursor() {
     screen_set_cursor_enabled(mode & MODE_CURSOR_VISIBLE);
-    screen_set_cursor_pos(state.x, state.y + base_y);
+    screen_set_cursor_pos(vt_state.x, vt_state.y + base_y);
 }
 
 static void write_code_point(uint32_t cp) {
@@ -860,9 +856,9 @@ static void write_code_point(uint32_t cp) {
 
 static void do_vt_reset() {
     mode = DEFAULT_MODE;
-    state.x = state.y = 0;
-    state.attributes = DEFAULT_ATTR;
-    state.reverse_colors = false;
+    vt_state.x = vt_state.y = 0;
+    vt_state.attributes = DEFAULT_ATTR;
+    vt_state.reverse_colors = false;
     base_y = scroll_y0 = 0;
     base_height = scroll_y1 = SCREEN_HEIGHT;
     update_cursor();
@@ -894,6 +890,7 @@ void vt_init() {
 
     screen_init();
     do_vt_reset();
+    saved_state = vt_state;
 }
 
 void vt_reset() {
@@ -1080,14 +1077,14 @@ bool vt_read_byte(uint8_t *out) {
 }
 
 void vt_backspace() {
-    if (state.x > 0) {
-        state.x -= 1;
+    if (vt_state.x > 0) {
+        vt_state.x -= 1;
     } else {
-        ASSERT(state.y > 0);
-        state.x = SCREEN_WIDTH - 1;
-        state.y -= 1;
+        ASSERT(vt_state.y > 0);
+        vt_state.x = SCREEN_WIDTH - 1;
+        vt_state.y -= 1;
     }
 
-    screen_set_char(state.x, state.y + base_y, cp_to_val(BLANK_CHAR));
+    screen_set_char(vt_state.x, vt_state.y + base_y, cp_to_val(BLANK_CHAR));
     update_cursor();
 }

@@ -61,6 +61,7 @@ kernel_elf = executable(
     config,
     build_by_default: false,
     c_args: [
+        '-D_GNU_SOURCE',
         '-ffreestanding',
         '-fno-asynchronous-unwind-tables',
         '-fno-pie',

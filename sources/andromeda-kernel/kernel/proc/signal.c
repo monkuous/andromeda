@@ -77,33 +77,36 @@ typedef struct {
     sigctx_no_ra_t rest;
 } sigctx_t;
 
-static bool try_trigger_signals(signal_target_t *target) {
-    if (!target->num_pending) return false;
-    bool force_default = false;
+static pending_signal_t *get_pending_signal(signal_target_t *target, bool *was_forced_out) {
+    if (!target->num_pending) return nullptr;
 
-retry:
-    pending_signal_t *sig;
-    int i;
+    for (int i = 0; i < NSIG; i++) {
+        pending_signal_t *sig = target->signals[i];
 
-    for (i = 0; i < NSIG; i++) {
-        sig = target->signals[i];
         if (sig) {
             if (sigset_get(&current->signal_mask, i)) {
                 if (sig->force) {
-                    force_default = true;
-                } else {
-                    sig = nullptr;
-                    continue;
+                    if (was_forced_out) *was_forced_out = true;
+                    return sig;
                 }
+
+                continue;
             }
 
-            break;
+            return sig;
         }
     }
 
-    if (!sig) return false;
+    return nullptr;
+}
 
-    ASSERT(sig->info.si_signo == i);
+static bool try_trigger_signals(signal_target_t *target) {
+    bool force_default = false;
+
+retry:
+    pending_signal_t *sig = get_pending_signal(target, &force_default);
+    if (!sig) return false;
+    int i = sig->info.si_signo;
 
     struct sigaction *action = &current->process->signal_handlers[i];
 
@@ -113,7 +116,9 @@ retry:
         switch (disp) {
         case SD_TERMINATE: proc_kill(sig); break;
         case SD_IGNORE: break;
-        case SD_STOP: proc_stop(sig); break;
+        case SD_STOP:
+            if (current->process->group->orphan_inhibitors) proc_stop(sig);
+            break;
         }
     } else if (action->sa_handler != SIG_IGN) {
         idt_frame_t *regs = &current->regs;
@@ -198,6 +203,13 @@ void trigger_signals() {
     if (!try_trigger_signals(&current->signals)) {
         try_trigger_signals(&current->process->signals);
     }
+}
+
+bool is_masked_or_ignored(unsigned sig) {
+    ASSERT(sig < NSIG);
+
+    return sigset_get(&current->signal_mask, sig) || current->process->signal_handlers[sig].sa_handler == SIG_IGN ||
+           get_default_disposition(sig) == SD_IGNORE;
 }
 
 void cleanup_signals(signal_target_t *target) {

@@ -1,5 +1,6 @@
 #include "process.h"
 #include "compiler.h"
+#include "drv/console.h"
 #include "fs/vfs.h"
 #include "mem/vmalloc.h"
 #include "proc/sched.h"
@@ -18,6 +19,7 @@
 #include <sys/wait.h>
 
 #define FD_RESERVED ((void *)1)
+#define MAX_PID (INT_MAX - 1)
 
 procent_t init_procent;
 
@@ -25,6 +27,10 @@ static procent_t **procs;
 static size_t proc_capacity;
 static size_t proc_count;
 static pid_t last_pid;
+
+static bool inhibits_group_orphaning(process_t *parent, process_t *child) {
+    return parent->group != child->group && parent->group->session == child->group->session;
+}
 
 static procent_t *pidresolve(pid_t pid) {
     if (!proc_capacity) return nullptr;
@@ -178,14 +184,28 @@ static void leave_session([[maybe_unused]] prgroup_t *group, session_t *session)
 static void leave_group(process_t *proc, prgroup_t *group) {
     ASSERT(proc->group == group);
 
+    if (proc->stopped) proc->group->num_stopped -= 1;
     list_remove(&group->members, &proc->gnode);
 
     if (list_is_empty(&group->members)) {
         leave_session(group, group->session);
 
+        if (group->foreground) {
+            console_disconnect_from_group();
+        }
+
         procent_t *ent = gent(group);
         ent->has_group = false;
         maybe_free_procent(ent);
+    }
+}
+
+static void handle_group_orphaned(prgroup_t *group) {
+    if (group->num_stopped) {
+        siginfo_t info = {.si_signo = SIGHUP, .si_code = SI_KERNEL};
+        group_signal(group, &info);
+        info.si_signo = SIGCONT;
+        group_signal(group, &info);
     }
 }
 
@@ -224,6 +244,9 @@ int setpgid(pid_t pid, pid_t pgid) {
         ASSERT(list_is_empty(&group_ent->group.members));
         group_ent->has_group = true;
         group_ent->group.session = old_group->session;
+        group_ent->group.orphan_inhibitors = 1;
+        group_ent->group.num_stopped = 0;
+        group_ent->group.foreground = false;
         old_group->session->members += 1;
     }
 
@@ -231,6 +254,23 @@ int setpgid(pid_t pid, pid_t pgid) {
 
     process->group = &group_ent->group;
     list_insert_tail(&group_ent->group.members, &process->gnode);
+    if (process->stopped) process->group->num_stopped += 1;
+
+    list_foreach(process->children, process_t, pnode, cur) {
+        if (cur->group->session == old_group->session) {
+            bool was_inhibit = cur->group != old_group;
+            bool now_inhibit = cur->group != &group_ent->group;
+
+            if (was_inhibit != now_inhibit) {
+                if (now_inhibit) {
+                    cur->group->orphan_inhibitors += 1;
+                } else if (--cur->group->orphan_inhibitors == 0) {
+                    handle_group_orphaned(cur->group);
+                }
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -241,6 +281,8 @@ pid_t setsid() {
     if (ent->has_group || ent == gent(proc->group)) return -EPERM;
     ASSERT(!ent->has_session);
 
+    prgroup_t *old_group = proc->group;
+    session_t *old_session = old_group->session;
     leave_group(proc, proc->group);
 
     ASSERT(ent->session.members == 0);
@@ -254,13 +296,21 @@ pid_t setsid() {
     proc->group = &ent->group;
     list_insert_tail(&ent->group.members, &proc->gnode);
 
+    list_foreach(proc->children, process_t, pnode, cur) {
+        if (cur->group->session == old_session && cur->group != old_group) {
+            if (--cur->group->orphan_inhibitors == 0) {
+                handle_group_orphaned(cur->group);
+            }
+        }
+    }
+
     return ent->id;
 }
 
 pid_t pfork(thread_t **thread) {
     process_t *curp = current->process;
 
-    if (last_pid == INT_MAX) return -EAGAIN;
+    if (last_pid == MAX_PID) return -EAGAIN;
 
     procent_t *ent = vmalloc(sizeof(*ent));
     memset(ent, 0, sizeof(*ent));
@@ -317,7 +367,7 @@ pid_t pfork(thread_t **thread) {
 }
 
 pid_t tfork(thread_t **thread) {
-    if (last_pid == INT_MAX) return -EAGAIN;
+    if (last_pid == MAX_PID) return -EAGAIN;
 
     procent_t *ent = vmalloc(sizeof(*ent));
     memset(ent, 0, sizeof(*ent));
@@ -504,6 +554,17 @@ static void make_zombie(process_t *proc) {
         cur->parent = &init_process;
         list_insert_tail(&init_process.children, &cur->pnode);
 
+        bool was_inhibit = inhibits_group_orphaning(proc, cur);
+        bool now_inhibit = inhibits_group_orphaning(&init_process, cur);
+
+        if (was_inhibit != now_inhibit) {
+            if (now_inhibit) {
+                cur->group->orphan_inhibitors += 1;
+            } else if (--cur->group->orphan_inhibitors == 0) {
+                handle_group_orphaned(cur->group);
+            }
+        }
+
         cur = next;
     }
 
@@ -521,6 +582,10 @@ static void make_zombie(process_t *proc) {
     }
 
     vmfree(proc->fds, sizeof(*proc->fds) * proc->fds_cap);
+
+    if (proc->owns_tty) {
+        console_disconnect_from_session(true);
+    }
 
     send_signal(proc->parent, nullptr, &proc->wa_info, false);
 
@@ -727,6 +792,8 @@ void proc_stop(pending_signal_t *trigger) {
     if (current->process->stopped) return;
     current->process->stopped = true;
 
+    current->process->group->num_stopped += 1;
+
     if (should_send_sigstopcont()) {
         ASSERT(current->process->wa_info.si_signo == 0);
         current->process->wa_info = (siginfo_t){
@@ -749,6 +816,8 @@ void proc_stop(pending_signal_t *trigger) {
 void proc_continue(process_t *proc, pending_signal_t *trigger) {
     if (!proc->stopped) return;
     proc->stopped = false;
+
+    proc->group->num_stopped -= 1;
 
     if (trigger && should_send_sigstopcont()) {
         ASSERT(current->process->wa_info.si_signo == 0);
@@ -1008,4 +1077,34 @@ int proc_sendsig(pid_t pid, int sig) {
     }
 
     return 0;
+}
+
+bool is_session_leader(process_t *proc) {
+    return &pent(proc)->session == proc->group->session;
+}
+
+pid_t get_pgid(prgroup_t *group) {
+    return gent(group)->id;
+}
+
+prgroup_t *resolve_pgid(pid_t pid) {
+    procent_t *ent = pidresolve(pid);
+    if (unlikely(!ent) || unlikely(!ent->has_group)) return nullptr;
+    return &ent->group;
+}
+
+void group_signal(prgroup_t *group, siginfo_t *sig) {
+    list_foreach(group->members, process_t, gnode, cur) {
+        send_signal(cur, nullptr, sig, false);
+    }
+}
+
+pid_t get_sid(session_t *session) {
+    return sent(session)->id;
+}
+
+process_t *get_session_leader(session_t *session) {
+    procent_t *ent = sent(session);
+    if (!ent->has_process) return nullptr;
+    return &ent->process;
 }

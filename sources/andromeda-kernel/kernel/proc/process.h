@@ -64,11 +64,16 @@ struct process {
     bool did_exec : 1;
     bool has_wait : 1;
     bool stopped : 1;
+    bool owns_tty : 1;
 };
 
 struct prgroup {
     session_t *session;
     list_t members;
+    // the number of processes whose parent is in a different group within the same sesssion
+    size_t orphan_inhibitors;
+    size_t num_stopped;
+    bool foreground : 1;
 };
 
 struct session {
@@ -147,3 +152,10 @@ int fd_fcntl(int fd, int cmd, uintptr_t arg);
 int fd_allocassoc(int fd, file_t *file, int flags);
 
 int proc_sendsig(pid_t pid, int sig);
+
+bool is_session_leader(process_t *proc);
+pid_t get_pgid(prgroup_t *group);
+prgroup_t *resolve_pgid(pid_t pid);
+void group_signal(prgroup_t *group, siginfo_t *sig);
+pid_t get_sid(session_t *session);
+process_t *get_session_leader(session_t *session);

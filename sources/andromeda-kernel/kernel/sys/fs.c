@@ -13,7 +13,6 @@
 #include "string.h"
 #include "sys/syscall.h"
 #include "util/list.h"
-#include <bits/posix/stat.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>

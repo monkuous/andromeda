@@ -1,8 +1,8 @@
 #pragma once
 
-#include <bits/ssize_t.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 extern void *hostname;
 extern size_t hostname_len;
