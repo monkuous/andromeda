@@ -237,9 +237,7 @@ void console_poll_events() {
         switch (c) {
         case 0x7f:
             if (echo_count) {
-                vt_write_byte('\b');
-                vt_write_byte(' ');
-                vt_write_byte('\b');
+                vt_backspace();
                 echo_count -= 1;
             }
 

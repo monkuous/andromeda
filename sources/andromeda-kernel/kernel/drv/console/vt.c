@@ -1078,3 +1078,16 @@ bool vt_read_byte(uint8_t *out) {
     *out = value;
     return true;
 }
+
+void vt_backspace() {
+    if (state.x > 0) {
+        state.x -= 1;
+    } else {
+        ASSERT(state.y > 0);
+        state.x = SCREEN_WIDTH - 1;
+        state.y -= 1;
+    }
+
+    screen_set_char(state.x, state.y + base_y, cp_to_val(BLANK_CHAR));
+    update_cursor();
+}
