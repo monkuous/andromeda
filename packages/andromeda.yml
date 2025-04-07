@@ -5,8 +5,10 @@ packages:
       subdir: ports
       version: '0.0pl@ROLLING_ID@'
     pkgs_required:
+      - andromeda-boot
       - andromeda-init
       - andromeda-kernel
       - andromeda-util
       - bash
       - coreutils
+      - nano

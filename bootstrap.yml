@@ -50,6 +50,7 @@ imports:
   - file: packages/libtool.yml
   - file: packages/meson.yml
   - file: packages/mlibc.yml
+  - file: packages/nano.yml
   - file: packages/ncurses.yml
   - file: packages/pkgconf.yml
   - file: packages/tzdata.yml

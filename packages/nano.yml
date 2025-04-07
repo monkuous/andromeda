@@ -1,0 +1,32 @@
+packages:
+  - name: nano
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: 'ports'
+      url: 'https://ftpmirror.gnu.org/nano/nano-8.4.tar.xz'
+      checksum: 'blake2b:2e5dbe6982ef9d284c6e018abad593bf383f27c85047241bafaa098948b73897c0a81b63aa453385ac93afc1c398936464d5a1fb024d00936ad383c5e5e4403f'
+      format: 'tar.xz'
+      extract_path: 'nano-8.4'
+      version: '8.4'
+      tools_required:
+        - autoconf
+        - automake
+        - libtool
+        - pkgconf
+      regenerate:
+        - args: ['@SOURCE_ROOT@/support/autoconf/regenerate.sh']
+    pkgs_required:
+      - ncurses
+    tools_required:
+      - gcc
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--prefix=/usr'
+          - 'gl_cv_func_strcasecmp_works=yes'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
+      - args: ['mkdir', '-p', '@THIS_COLLECT_DIR@/etc']
+      - args: ['cp', '-p', 'doc/sample.nanorc', '@THIS_COLLECT_DIR@/etc/nanorc']

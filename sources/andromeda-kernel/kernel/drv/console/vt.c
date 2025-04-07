@@ -10,6 +10,25 @@
 #include "util/print.h"
 #include <stdint.h>
 
+#if 0
+static void on_invalid() {
+}
+
+#define INVALID_ESCAPE(x)                                                                                              \
+    ({                                                                                                                 \
+        printk("vt: unknown escape byte 0x%x during %s\n", (x), __func__);                                             \
+        on_invalid();                                                                                                  \
+    })
+#define INVALID_PARAM(x)                                                                                               \
+    ({                                                                                                                 \
+        printk("vt: unknown parameter 0x%x during %s\n", (x), __func__);                                               \
+        on_invalid();                                                                                                  \
+    })
+#else
+#define INVALID_ESCAPE(x) ((void)0)
+#define INVALID_PARAM(x) ((void)0)
+#endif
+
 #define ESC_MAX_PARAMS 16
 #define BLANK_CHAR ' '
 #define DEFAULT_ATTR 0x700
@@ -65,15 +84,24 @@ static uint16_t cp_to_val(uint32_t cp) {
 }
 
 static uint16_t do_reverse(uint16_t val) {
+    return (val & 0xff) | ((val & 0xf000) >> 4) | ((val & 0x0f00) << 4);
+}
+
+static uint16_t maybe_reverse(uint16_t val) {
     if (mode & MODE_REVERSE_VIDEO) {
-        return (val & 0xff) | ((val & 0xf000) >> 4) | ((val & 0x0f00) << 4);
+        return do_reverse(val);
     }
 
     return val;
 }
 
 static void do_set_char(unsigned x, unsigned y, uint16_t value) {
-    screen_set_char(x, y, do_reverse(value));
+    screen_set_char(x, y, maybe_reverse(value));
+}
+
+static void set_new_char(unsigned x, unsigned y, uint16_t value) {
+    if (vt_state.reverse_colors) value = do_reverse(value);
+    screen_set_char(x, y, value);
 }
 
 static void update_autorepeat() {
@@ -97,8 +125,6 @@ static void update_mode(unsigned new_mode) {
 
     unsigned old_mode = mode;
     mode = new_mode;
-
-    vt_state.reverse_colors = new_mode & MODE_REVERSE_VIDEO;
 
     if ((old_mode & MODE_REVERSE_VIDEO) != (new_mode & MODE_REVERSE_VIDEO)) {
         for (unsigned y = 0; y < SCREEN_HEIGHT; y++) {
@@ -168,13 +194,6 @@ static void save_state() {
 
 static void restore_state() {
     vt_state = saved_state;
-
-    unsigned m = mode;
-
-    if (vt_state.reverse_colors) m |= MODE_REVERSE_VIDEO;
-    else m &= ~MODE_REVERSE_VIDEO;
-
-    update_mode(m);
 }
 
 static void process_esc_init(uint32_t cp) {
@@ -199,7 +218,7 @@ static void process_esc_init(uint32_t cp) {
     case '=': update_mode(mode | MODE_KEYPAD_APPLICATION); break;
     case ']': esc_state = ESC_OSC; break;
     case '[': esc_state = ESC_CSI_START; break;
-    default: break;
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -210,7 +229,7 @@ static void process_esc_set_charset(uint32_t cp) {
     case '@': break; // TODO: Select ISO 8859-1
     case 'G':
     case '8': break; // TODO: Select UTF-8
-    default: break;
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -225,7 +244,7 @@ static void process_esc_align_test(uint32_t cp) {
             }
         }
         break;
-    default: break;
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -237,7 +256,7 @@ static void process_esc_set_g(int, uint32_t cp) {
     case '0': break; // TODO: Set VT100 mapping
     case 'U': break; // TODO: Set null mapping
     case 'K': break; // TODO: Set user mapping
-    default: break;
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -250,7 +269,7 @@ static void process_esc_osc(uint32_t cp) {
         esc_state = ESC_OSC_PALETTE;
         esc_nparam = 0;
         break;
-    default: break;
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -260,7 +279,10 @@ static bool is_hex(uint32_t cp) {
 
 static void process_esc_osc_palette(uint32_t cp) {
     // The palette is not configurable, so just confirm validity and discard the data
-    if (!is_hex(cp) || esc_nparam++ == 7) {
+    if (!is_hex(cp)) {
+        INVALID_ESCAPE(cp);
+        esc_state = ESC_NONE;
+    } else if (esc_nparam++ == 7) {
         esc_state = ESC_NONE;
     }
 }
@@ -287,16 +309,14 @@ static void process_esc_get_params(uint32_t cp) {
             return;
         }
 
-        break;
+        esc_state = esc_get_params_next;
+        return process_escape(cp);
     }
-
-    esc_state = esc_get_params_next;
-    return process_escape(cp);
 }
 
 static void process_esc_param_ignore(uint32_t cp) {
     if (cp < 0x20 || cp > 0x3f) {
-        esc_state = ESC_NONE;
+        esc_state = ESC_IGNORE_ONE;
     }
 }
 
@@ -334,11 +354,11 @@ static void insert_chars(uint32_t cp, unsigned count) {
 
     for (i = 0; i < rem; i++, x++) {
         screen_set_char(x + count, vt_state.y + base_y, screen_get_char(x, vt_state.y));
-        if (i < count) do_set_char(x, vt_state.y + base_y, val);
+        if (i < count) set_new_char(x, vt_state.y + base_y, val);
     }
 
     for (; i < count; i++, x++) {
-        do_set_char(x, vt_state.y + base_y, val);
+        set_new_char(x, vt_state.y + base_y, val);
     }
 }
 
@@ -393,12 +413,15 @@ static void erase_screen(unsigned type) {
             }
         }
         break;
-    default: return;
+    default: INVALID_PARAM(type); return;
     }
 }
 
 static void erase_line(unsigned type) {
-    if (type > 2) return;
+    if (type > 2) {
+        INVALID_PARAM(type);
+        return;
+    }
 
     uint16_t val = cp_to_val(BLANK_CHAR);
 
@@ -494,7 +517,7 @@ static void remove_tab_stops(unsigned type) {
     switch (type) {
     case 0: clear_tab_stop(vt_state.x); break;
     case 3: memset(tab_stops, 0, sizeof(tab_stops)); break;
-    default: return;
+    default: INVALID_PARAM(type); return;
     }
 }
 
@@ -502,11 +525,13 @@ static unsigned get_mode_mask() {
     unsigned mask = 0;
 
     for (unsigned i = 0; i < esc_nparam; i++) {
-        switch (get_esc_param(i, 0)) {
+        unsigned param = get_esc_param(i, 0);
+
+        switch (param) {
         case 3: mask |= MODE_DISPLAY_CONTROL; break;
         case 4: mask |= MODE_INSERT; break;
         case 20: mask |= MODE_AUTO_CR; break;
-        default: break;
+        default: INVALID_PARAM(param); break;
         }
     }
 
@@ -538,7 +563,11 @@ static bool col256_to_rgb(unsigned value, uint8_t out[3]) {
         return true;
     }
 
-    if (value >= 256) return false;
+    if (value >= 256) {
+        INVALID_PARAM(value);
+        return false;
+    }
+
     value -= 232;
 
     unsigned level = value * 10 + 8;
@@ -588,7 +617,8 @@ static int colext_to_out(unsigned *i) {
 
     uint8_t color[3];
 
-    switch (get_next_arg(i)) {
+    unsigned type = get_next_arg(i);
+    switch (type) {
     case 2:
         color[0] = clamp(get_next_arg(i), 0, 0xff);
         color[1] = clamp(get_next_arg(i), 0, 0xff);
@@ -601,7 +631,7 @@ static int colext_to_out(unsigned *i) {
         if (!col256_to_rgb(input, color)) return -1;
         break;
     }
-    default: return -1;
+    default: INVALID_PARAM(type); return -1;
     }
 
     int cur = 0;
@@ -623,8 +653,13 @@ static void set_attributes() {
     for (unsigned i = 0; i < esc_nparam; i++) {
         unsigned param = get_esc_param(i, 0);
 
-        switch (get_esc_param(i, 0)) {
-        case 0: vt_state.attributes = DEFAULT_ATTR; break;
+        switch (param) {
+        case 0:
+            vt_state.attributes = DEFAULT_ATTR;
+            vt_state.reverse_colors = false;
+            break;
+        case 7: vt_state.reverse_colors = true; break;
+        case 27: vt_state.reverse_colors = false; break;
         case 30 ... 37: SET_FG(color_to_out(param - 30)); break;
         case 38: {
             int color = colext_to_out(&i);
@@ -643,6 +678,7 @@ static void set_attributes() {
         }
         case 49: SET_BG(7); break; // set default
         case 90 ... 97: SET_FG(color_to_out(param - 90 + 8)); break;
+        default: INVALID_PARAM(param);
         }
     }
 }
@@ -657,7 +693,7 @@ static void report_info(unsigned type) {
         inject_input(buf, length);
         break;
     }
-    default: return;
+    default: INVALID_PARAM(type); return;
     }
 }
 
@@ -667,7 +703,7 @@ static void set_leds(unsigned type) {
     case 1: break; // set scroll lock
     case 2: break; // set num lock
     case 3: break; // set caps lock
-    default: return;
+    default: INVALID_PARAM(type); return;
     }
 }
 
@@ -688,7 +724,7 @@ static void set_scroll_region(unsigned y0, unsigned y1) {
 static void process_linux_command(unsigned type) {
     switch (type) {
     case 8: vt_state.attributes = DEFAULT_ATTR; return;
-    default: return;
+    default: INVALID_PARAM(type); return;
     }
 }
 
@@ -706,7 +742,10 @@ static void process_esc_csi(uint32_t cp) {
     case 'E': vt_state.x = 0; return incr_coord(&vt_state.y, base_height, get_esc_param(0, 1));
     case 'F': vt_state.x = 0; return incr_coord(&vt_state.y, base_height, -(int)get_esc_param(0, 1));
     case 'f':
-    case 'H': vt_state.y = clamp(get_esc_param(1, 1), 1, base_height) - 1; // fall through
+    case 'H':
+        vt_state.y = clamp(get_esc_param(0, 1), 1, base_height) - 1;
+        vt_state.x = clamp(get_esc_param(1, 0), 1, SCREEN_WIDTH) - 1;
+        return;
     case '`':
     case 'G': vt_state.x = clamp(get_esc_param(0, 1), 1, SCREEN_WIDTH) - 1; return;
     case 'J': return erase_screen(get_esc_param(0, 0));
@@ -731,6 +770,7 @@ static void process_esc_csi(uint32_t cp) {
     case 's': return save_state();
     case 'u': return restore_state();
     case ']': return process_linux_command(get_esc_param(0, 0));
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -738,27 +778,47 @@ static unsigned get_dec_mode_mask() {
     unsigned mask = 0;
 
     for (unsigned i = 0; i < esc_nparam; i++) {
-        switch (get_esc_param(i, 0)) {
+        unsigned param = get_esc_param(i, 0);
+
+        switch (param) {
         case 1: mask |= MODE_CURSOR_APPLICATION; break;
         case 5: mask |= MODE_REVERSE_VIDEO; break;
         case 6: mask |= MODE_SCROLL_RELATIVE; break;
         case 7: mask |= MODE_AUTO_WRAP; break;
         case 8: mask |= MODE_AUTO_REPEAT; break;
         case 25: mask |= MODE_CURSOR_VISIBLE; break;
-        default: break;
+        default: INVALID_PARAM(param); break;
         }
     }
 
     return mask;
 }
 
+static void set_cursor_type() {
+    // Changing the cursor type is not supported
+    // For future reference:
+    //  If parameter 0 is 0, reset to default
+    //  Otherwise:
+    //   Parameter 0 specifies size:
+    //    1: no cursor
+    //    2: underline
+    //    3: lower 1/3rd
+    //    4: lower half
+    //    5: lower 2/3rds
+    //    6: full block
+    //   Parameter 1 specifies which bits should be flipped from the original character
+    //   Parameter 2 specifies which bits should be set from the original character
+}
+
 static void process_esc_csi_dec(uint32_t cp) {
     esc_state = ESC_NONE;
 
     switch (cp) {
+    case 'c': return set_cursor_type();
     case 'h': return update_mode(mode | get_dec_mode_mask());
     case 'l': return update_mode(mode & ~get_dec_mode_mask());
     case 'n': return report_info(get_esc_param(0, 0));
+    default: INVALID_ESCAPE(cp); break;
     }
 }
 
@@ -782,7 +842,10 @@ static void process_escape(uint32_t cp) {
     case ESC_CSI: return process_esc_csi(cp);
     case ESC_CSI_DEC: return process_esc_csi_dec(cp);
     case ESC_IGNORE_ONE: return process_esc_ignore_one(cp);
-    default: esc_state = ESC_NONE; return;
+    default:
+        esc_state = ESC_NONE;
+        INVALID_ESCAPE(cp);
+        return;
     }
 }
 
@@ -829,9 +892,12 @@ static void do_write_cp(uint32_t cp) {
         return;
     }
 
-    if (cp < 0x20) return;
+    if (cp < 0x20) {
+        INVALID_ESCAPE(cp);
+        return;
+    }
 
-    do_set_char(vt_state.x++, vt_state.y + base_y, cp_to_val(cp));
+    set_new_char(vt_state.x++, vt_state.y + base_y, cp_to_val(cp));
 
     if (vt_state.x >= SCREEN_WIDTH) {
         if (mode & MODE_AUTO_WRAP) {
@@ -905,6 +971,8 @@ static unsigned utf8_rem;
 #define UTF8_ERROR 0xfffd
 
 void vt_write_byte(uint8_t value) {
+    asm("out %0, %1" ::"a"(value), "Nd"(0x3f8));
+
 again:
     if (!utf8_rem) {
         if ((value & 0x80) == 0) {
