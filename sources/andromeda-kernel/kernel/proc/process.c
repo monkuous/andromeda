@@ -470,7 +470,7 @@ pid_t pwait(pid_t pid, int options, void (*cont)(pid_t, siginfo_t *, void *), vo
 
     process_t *cproc = current->process;
 
-    if (list_is_empty(&cproc->children)) return ECHILD;
+    if (list_is_empty(&cproc->children)) return -ECHILD;
 
     list_foreach(cproc->wait_avail, process_t, wa_node, child) {
         if (wait_matches(pid, options, cproc, child)) {

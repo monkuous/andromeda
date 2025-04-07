@@ -1,6 +1,7 @@
 #include "idt.h"
 #include "asm/cr.h"
 #include "cpu/gdt.h"
+#include "drv/idle.h"
 #include "mem/layout.h"
 #include "mem/pmap.h"
 #include "proc/sched.h"
@@ -148,6 +149,8 @@ void init_idt() {
     idt_frame_t *frame = real_frame;
 
     if (real_frame->cs & 3) {
+        idle_poll_events();
+
         current->regs = *real_frame;
         frame = &current->regs;
 

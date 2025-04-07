@@ -89,9 +89,9 @@ void send_signal(process_t *process, thread_t *thread, siginfo_t *info, bool for
 }
 
 typedef struct {
-    uintptr_t a2;
-    uintptr_t a1;
     uintptr_t a0;
+    uintptr_t a1;
+    uintptr_t a2;
     siginfo_t info;
     ucontext_t context;
     struct _fpstate fpu;
