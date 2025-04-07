@@ -1,6 +1,7 @@
 #include "linux.h"
 #include <andromeda/cpu.h>
 #include <andromeda/memory.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +21,24 @@ typedef struct {
     uint64_t gdt[4];
     char cmdline[];
 } start_data_t;
+
+static FILE *do_open(const char *path) {
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        fprintf(stderr, "%s: failed to open %s: %m\n", progname, path);
+        exit(1);
+    }
+    return file;
+}
+
+static FILE *maybe_open(const char *path) {
+    FILE *file = fopen(path, "r");
+    if (!file && errno != ENOENT) {
+        fprintf(stderr, "%s: failed to open %s: %m\n", progname, path);
+        exit(1);
+    }
+    return file;
+}
 
 static uint32_t phys_alloc(void **virt_out, size_t pages, size_t align) {
     andromeda_pmalloc_t request = {
@@ -62,6 +81,7 @@ static void fill_setup_info(
     if (initrd_size) {
         void *virt;
         initrd_phys = phys_alloc(&virt, (initrd_size + 0xfff) >> 12, 0x1000);
+        printf("loading initrd\n");
         memcpy(virt, initrd, initrd_size);
     } else {
         initrd_phys = 0;
@@ -75,6 +95,46 @@ static void fill_setup_info(
     info->ramdisk_size = initrd_size;
     info->cmd_line_ptr = start_data_phys + offsetof(start_data_t, cmdline);
     info->setup_data = 0;
+}
+
+static void fill_e820(boot_params_t *params) {
+    FILE *file = do_open("/sys/memory-map");
+
+    while (params->e820_entries < sizeof(params->e820_table) / sizeof(*params->e820_table)) {
+        uint64_t head, tail;
+        char type[32];
+        if (fscanf(file, "%llx-%llx %s", &head, &tail, type) < 3) break;
+
+        if (head < 0x1000) head = 0x1000;
+        if (head > tail) continue;
+
+        boot_e820_entry_t *entry = &params->e820_table[params->e820_entries++];
+
+        entry->addr = head;
+        entry->size = tail - head + 1;
+
+        if (!strcmp(type, "usable")) entry->type = 1;
+        else if (!strcmp(type, "acpi-reclaimable")) entry->type = 3;
+        else if (!strcmp(type, "acpi-nvs")) entry->type = 4;
+        else entry->type = 2; // assume all unrecognized types are reserved
+
+        printf("got e820: %#llx-%#llx %u\n", entry->addr, entry->addr + entry->size, entry->type);
+    }
+
+    fclose(file);
+}
+
+static void fill_acpi(boot_params_t *params) {
+    FILE *file = maybe_open("/sys/acpi-rsdp-addr");
+    if (!file) return;
+
+    uint64_t addr;
+    if (fscanf(file, "%llx", &addr)) {
+        params->acpi_rsdp_addr = addr;
+        printf("got rsdp: %#llx\n", addr);
+    }
+
+    fclose(file);
 }
 
 static void fill_boot_params(
@@ -91,16 +151,10 @@ static void fill_boot_params(
     memcpy(&params->setup_info, &image->info, setup_end - offsetof(linux_image_t, info));
 
     fill_setup_info(image, &params->setup_info, kernel_phys, start_data_phys, initrd, initrd_size);
+    fill_e820(params);
+    fill_acpi(params);
 
     // todo: determine these values properly
-    params->e820_entries = 2;
-    params->e820_table[0].addr = 0x1000;
-    params->e820_table[0].size = 0x9e000;
-    params->e820_table[0].type = 1;
-    params->e820_table[1].addr = 0x100000;
-    params->e820_table[1].size = 0x7ee0000;
-    params->e820_table[1].type = 1;
-
     params->screen_info.orig_video_mode = 3;
     params->screen_info.orig_video_ega_bx = 3;
     params->screen_info.orig_video_lines = 25;
@@ -133,7 +187,10 @@ static void load_kernel(const linux_image_t *image, uint32_t start_data_phys, co
     printf("zero page at 0x%x (%p)\n", params_phys, params);
 
     fill_boot_params(image, params, kernel_phys, start_data_phys, initrd, initrd_size);
+
+    printf("loading kernel image\n");
     memcpy(kernel, (const void *)image + kernel_start, image->info.syssize << 4);
+    printf("starting kernel\n");
 
     int cpu_fd = open("/dev/cpu", O_WRONLY);
     if (cpu_fd < 0) {
