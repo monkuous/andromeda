@@ -161,7 +161,7 @@ static bool alloc_slow_func(uint64_t head, uint64_t tail, memory_type_t type, vo
             for (i = 0; i < count; i++) {
                 page_t *page = &base[i];
 
-                if (page->is_cache) {
+                if (!page->is_free && page->is_cache) {
                     pgcache_evict_specific(page);
                 }
             }
