@@ -1,6 +1,7 @@
 #include "print.h"
 #include "drv/console.h"
 #include "drv/console/screen.h"
+#include "fs/vfs.h"
 #include "mem/vmalloc.h"
 #include "string.h"
 #include "util/panic.h"
@@ -201,4 +202,29 @@ size_t asprintk(char **output, const char *format, ...) {
     size_t length = vasprintk(output, format, args);
     va_end(args);
     return length;
+}
+
+struct fprintk_ctx {
+    file_t *file;
+    int error;
+};
+
+static void vfprintk_sink(const void *data, size_t length, void *ptr) {
+    struct fprintk_ctx *ctx = ptr;
+    if (ctx->error) return;
+    ctx->error = write_fully(ctx->file, data, length);
+}
+
+int vfprintk(file_t *file, const char *format, va_list args) {
+    struct fprintk_ctx ctx = {file, 0};
+    do_printk(vfprintk_sink, &ctx, format, args);
+    return ctx.error;
+}
+
+int fprintk(file_t *file, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int error = vfprintk(file, format, args);
+    va_end(args);
+    return error;
 }

@@ -6,4 +6,4 @@ img="$1"
 shift 1
 
 echo Starting QEMU
-qemu-system-i386 -debugcon stdio -M isapc -drive format=raw,file="$img" "$@"
+qemu-system-i386 -debugcon stdio -drive format=raw,file="$img" "$@"

@@ -5,6 +5,6 @@ project(
     meson_version: '>=1.4.0',
 )
 
-foreach name : ['mount', 'umount']
+foreach name : ['hexdump', 'mount', 'umount']
     executable(name, name + '.c', install: true)
 endforeach

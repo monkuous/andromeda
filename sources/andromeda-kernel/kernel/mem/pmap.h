@@ -1,8 +1,10 @@
 #pragma once
 
 #include "cpu/idt.h"
+#include "mem/pmem.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "string.h"
 
 #define PMAP_WRITABLE (1u << 1)
 
@@ -28,3 +30,17 @@ void pmap_unmap(uintptr_t virt, size_t size, bool skip_anon);
 bool pmap_walk(uint32_t *phys_out, uintptr_t virt);
 
 void *pmap_tmpmap(uint32_t phys);
+
+static inline void copy_from_phys(void *out, uint32_t phys, size_t size) {
+    while (size) {
+        uint32_t pgoff = phys & PAGE_MASK;
+        uint32_t pgrem = PAGE_SIZE - pgoff;
+        if (pgrem > size) pgrem = size;
+
+        memcpy(out, pmap_tmpmap(phys - pgoff) + pgoff, pgrem);
+
+        out += pgrem;
+        phys += pgrem;
+        size -= pgrem;
+    }
+}

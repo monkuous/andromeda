@@ -8,6 +8,7 @@
 #include "fs/detect.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
+#include "info/system.h"
 #include "mem/bootmem.h"
 #include "mem/memdetect.h"
 #include "mem/vmalloc.h"
@@ -108,6 +109,10 @@ static void mount_initrd() {
 
     error = vfs_mount(nullptr, "/realroot", 9, fsdetect, bdev);
     if (unlikely(error)) panic("failed to mount initrd (%d)", error);
+
+    struct ramfs_create_ctx ctx = {.mode = 0755};
+    error = vfs_mount(nullptr, "/realroot/sys", 13, ramfs_create, &ctx);
+    if (unlikely(error)) panic("failed to mount /sys (%d)", error);
 }
 
 static void chroot_to_initrd() {
@@ -164,5 +169,6 @@ static void chroot_to_initrd() {
     mount_boot();
     mount_initrd();
     chroot_to_initrd();
+    populate_sysfs();
     run_init();
 }

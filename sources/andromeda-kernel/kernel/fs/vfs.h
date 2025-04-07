@@ -1,7 +1,9 @@
 #pragma once
 
+#include "compiler.h"
 #include "fs/pgcache.h"
 #include "util/list.h"
+#include "util/panic.h"
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -253,3 +255,20 @@ dentry_t *vfs_mount_top(dentry_t *entry);
 
 // logs the contents of the dentry cache, starting at the true root
 void dump_vfs_state();
+
+static inline int write_fully(file_t *file, const void *buffer, size_t length) {
+    while (length) {
+        ssize_t actual = vfs_write(file, buffer, length < 0x7fffffff ? length : 0x7fffffff);
+        if (unlikely(actual < 0)) return -actual;
+
+        buffer += actual;
+        length -= actual;
+    }
+
+    return 0;
+}
+
+static inline void write_or_die(file_t *file, const void *buffer, size_t length) {
+    int error = write_fully(file, buffer, length);
+    if (unlikely(error)) panic("write failed (%d)", error);
+}

@@ -17,6 +17,7 @@ packages:
           - '@THIS_COLLECT_DIR@/tmp'
           - '@THIS_COLLECT_DIR@/usr/bin'
           - '@THIS_COLLECT_DIR@/usr/lib'
+          - '@THIS_COLLECT_DIR@/sys'
       - args:
           - 'ln'
           - '-sf'

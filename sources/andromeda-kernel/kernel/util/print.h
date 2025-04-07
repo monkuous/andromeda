@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fs/vfs.h"
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -13,3 +14,6 @@ size_t snprintk(void *buffer, size_t size, const char *format, ...);
 
 size_t vasprintk(char **output, const char *format, va_list args);
 size_t asprintk(char **output, const char *format, ...);
+
+int vfprintk(file_t *file, const char *format, va_list args);
+int fprintk(file_t *file, const char *format, ...);

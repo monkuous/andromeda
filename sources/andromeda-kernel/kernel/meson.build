@@ -32,6 +32,8 @@ kernel_elf = executable(
     'fs/pgcache.c',
     'fs/ramfs.c',
     'fs/vfs.c',
+    'info/acpi.c',
+    'info/system.c',
     'init/main.c',
     'init/main.S',
     'mem/bootmem.c',
