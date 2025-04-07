@@ -1423,7 +1423,7 @@ static int statvfs_inode(inode_t *inode, struct statvfs *out) {
 
 int vfs_statvfs(file_t *rel, const void *path, size_t length, struct statvfs *out) {
     dentry_t *entry;
-    int error = fresolve(&entry, rel, path, length, RESOLVE_MUST_EXIST | RESOLVE_NO_RO_FS | RESOLVE_FOLLOW_SYMLINKS);
+    int error = fresolve(&entry, rel, path, length, RESOLVE_MUST_EXIST | RESOLVE_FOLLOW_SYMLINKS);
     if (unlikely(error)) return error;
 
     error = statvfs_inode(entry->inode, out);
