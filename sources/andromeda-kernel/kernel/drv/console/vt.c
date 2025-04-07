@@ -971,8 +971,6 @@ static unsigned utf8_rem;
 #define UTF8_ERROR 0xfffd
 
 void vt_write_byte(uint8_t value) {
-    asm("out %0, %1" ::"a"(value), "Nd"(0x3f8));
-
 again:
     if (!utf8_rem) {
         if ((value & 0x80) == 0) {
