@@ -26,7 +26,7 @@ static bool verify_checksum(const void *ptr, size_t size) {
     return sum == 0;
 }
 
-static void *try_area(size_t *out, uint32_t base, size_t size) {
+static void *try_area(uint64_t *phys_out, size_t *len_out, uint32_t base, size_t size) {
     if (size < OLD_LENGTH) return nullptr;
     size -= OLD_LENGTH; // make size the highest allowed offset
 
@@ -65,24 +65,26 @@ static void *try_area(size_t *out, uint32_t base, size_t size) {
                 continue;
             }
 
-            *out = buf.length;
+            *phys_out = phys;
+            *len_out = buf.length;
             return area;
         }
 
         void *area = vmalloc(OLD_LENGTH);
         memcpy(area, &buf, OLD_LENGTH);
-        *out = OLD_LENGTH;
+        *phys_out = phys;
+        *len_out = OLD_LENGTH;
         return area;
     }
 
     return nullptr;
 }
 
-void *acpi_find_rsdp(size_t *length_out) {
+void *acpi_find_rsdp(uint64_t *phys_out, size_t *length_out) {
     uint16_t ebda_seg;
     copy_from_phys(&ebda_seg, 0x40e, sizeof(ebda_seg));
 
-    void *ptr = try_area(length_out, (uint32_t)ebda_seg << 4, 1024);
-    if (!ptr) ptr = try_area(length_out, 0xe0000, 0x20000);
+    void *ptr = try_area(phys_out, length_out, (uint32_t)ebda_seg << 4, 1024);
+    if (!ptr) ptr = try_area(phys_out, length_out, 0xe0000, 0x20000);
     return ptr;
 }

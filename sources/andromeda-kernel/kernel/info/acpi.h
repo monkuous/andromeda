@@ -4,4 +4,4 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void *acpi_find_rsdp(size_t *length_out);
+void *acpi_find_rsdp(uint64_t *phys_out, size_t *length_out);

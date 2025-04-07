@@ -49,11 +49,16 @@ static void populate_mmap() {
 }
 
 static void populate_acpi() {
+    uint64_t phys;
     size_t length;
-    void *rsdp = acpi_find_rsdp(&length);
+    void *rsdp = acpi_find_rsdp(&phys, &length);
     if (!rsdp) return;
 
-    file_t *file = open_file("acpi-rsdp");
+    file_t *file = open_file("acpi-rsdp-addr");
+    print(file, "0x%X\n", phys);
+    file_deref(file);
+
+    file = open_file("acpi-rsdp");
     write_or_die(file, rsdp, length);
     file_deref(file);
 
