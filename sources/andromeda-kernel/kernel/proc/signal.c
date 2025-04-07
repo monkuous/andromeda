@@ -31,8 +31,34 @@ static signal_disp_t get_default_disposition(int signal) {
     }
 }
 
+static bool would_trigger_signal(process_t *process, thread_t *thread, int signal, bool force) {
+    bool forced = false;
+
+    if (sigset_get(&thread->signal_mask, signal)) {
+        if (!force) return false;
+        forced = true;
+    }
+
+    struct sigaction *handler = &process->signal_handlers[signal];
+
+    if (forced || handler->sa_handler == SIG_DFL) {
+        return get_default_disposition(signal) != SD_STOP;
+    }
+
+    return handler->sa_handler != SIG_IGN;
+}
+
 void send_signal(process_t *process, thread_t *thread, siginfo_t *info, bool force) {
     ASSERT(info->si_signo < NSIG);
+
+    if (!thread) {
+        list_foreach(process->sigsuspends, struct sigsuspend_ctx, node, cur) {
+            if (would_trigger_signal(process, thread, info->si_signo, force)) {
+                thread = cur->thread;
+                break;
+            }
+        }
+    }
 
     signal_target_t *target = thread ? &thread->signals : &process->signals;
     pending_signal_t *buf = target->signals[info->si_signo];
@@ -203,6 +229,20 @@ void trigger_signals() {
     if (!try_trigger_signals(&current->signals)) {
         try_trigger_signals(&current->process->signals);
     }
+}
+
+bool will_trigger_signal() {
+    pending_signal_t *signal = get_pending_signal(&current->signals, nullptr);
+    if (!signal) signal = get_pending_signal(&current->process->signals, nullptr);
+    if (!signal) return false;
+
+    return would_trigger_signal(current->process, current, signal->info.si_signo, signal->force);
+}
+
+bool is_pending(unsigned sig) {
+    if (current->signals.signals[sig]) return true;
+    if (current->process->signals.signals[sig]) return true;
+    return false;
 }
 
 bool is_masked_or_ignored(unsigned sig) {

@@ -9,6 +9,7 @@ Andromeda is a BIOS bootloader that provides a POSIX-like preboot environment.
 - Read-only support for FAT12/16/32 and ISO9660, as well as a read-write ramfs implementation
 - Demand paging
 - Signals
+- Futexes
 - Boot protocol implementations run in userspace
 - The boot configuration is just a bash script
 

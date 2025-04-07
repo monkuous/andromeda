@@ -24,6 +24,12 @@ struct fd {
     int flags;
 };
 
+struct sigsuspend_ctx {
+    list_node_t node;
+    thread_t *thread;
+    sigset_t old_mask;
+};
+
 struct process {
     prgroup_t *group;
     list_node_t gnode;
@@ -34,6 +40,8 @@ struct process {
     list_t children;
     list_t threads;
     size_t nrunning;
+
+    list_t sigsuspends;
 
     uid_t euid;
     uid_t ruid;
@@ -110,11 +118,11 @@ pid_t getsid(pid_t pid);
 int setpgid(pid_t pid, pid_t pgid);
 pid_t setsid();
 
-int getgroups(int gidsetsize, gid_t grouplist[]);
+int proc_getgroups(size_t gidsetsize, gid_t grouplist[]);
 
 int setegid(gid_t egid);
 int seteuid(uid_t euid);
-int setgroups(size_t size, const gid_t list[]);
+int proc_setgroups(size_t size, const gid_t list[]);
 int setregid(gid_t rgid, gid_t egid);
 int setreuid(uid_t ruid, uid_t euid);
 int setresgid(gid_t rgid, gid_t egid, gid_t sgid);
@@ -151,6 +159,7 @@ int fd_fcntl(int fd, int cmd, uintptr_t arg);
 
 int fd_allocassoc(int fd, file_t *file, int flags);
 
+bool can_send_signal(process_t *proc, int sig);
 int proc_sendsig(pid_t pid, int sig);
 
 bool is_session_leader(process_t *proc);
@@ -159,3 +168,7 @@ prgroup_t *resolve_pgid(pid_t pid);
 void group_signal(prgroup_t *group, siginfo_t *sig);
 pid_t get_sid(session_t *session);
 process_t *get_session_leader(session_t *session);
+
+process_t *resolve_pid(pid_t pid);
+thread_t *resolve_tid(pid_t tid);
+pid_t proc_to_pid(process_t *proc);

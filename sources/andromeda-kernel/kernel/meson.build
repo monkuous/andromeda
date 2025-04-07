@@ -51,6 +51,7 @@ kernel_elf = executable(
     'sys/memory.c',
     'sys/misc.c',
     'sys/process.c',
+    'sys/sched.c',
     'sys/syscall.c',
     'sys/system.c',
     'sys/thread.c',

@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "drv/console.h"
 #include "fs/vfs.h"
+#include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "proc/sched.h"
 #include "proc/signal.h"
@@ -610,13 +611,15 @@ void free_thread_struct(thread_t *thread) {
     maybe_free_procent(ent);
 }
 
-int getgroups(int gidsetsize, gid_t grouplist[]) {
+int proc_getgroups(size_t gidsetsize, gid_t grouplist[]) {
     process_t *p = current->process;
 
     if (gidsetsize == 0) return p->ngroups;
-    if (gidsetsize < p->ngroups) return EINVAL;
+    if (gidsetsize < (unsigned)p->ngroups) return -EINVAL;
 
-    memcpy(grouplist, p->groups, p->ngroups * sizeof(*p->groups));
+    int error = -user_memcpy(grouplist, p->groups, p->ngroups * sizeof(*p->groups));
+    if (unlikely(error)) return error;
+
     return p->ngroups;
 }
 
@@ -638,13 +641,18 @@ int seteuid(uid_t euid) {
     return 0;
 }
 
-int setgroups(size_t size, const gid_t list[]) {
+int proc_setgroups(size_t size, const gid_t list[]) {
     process_t *p = current->process;
     if (p->euid != 0) return EPERM;
 
     if (size > sizeof(p->groups) / sizeof(*p->groups)) return EINVAL;
 
-    memcpy(p->groups, list, size * sizeof(*p->groups));
+    gid_t ids[sizeof(p->groups) / sizeof(*p->groups)];
+
+    int error = user_memcpy(ids, list, size * sizeof(*p->groups));
+    if (unlikely(error)) return error;
+
+    memcpy(p->groups, ids, size * sizeof(*p->groups));
     p->ngroups = size;
 
     return 0;
@@ -990,7 +998,7 @@ int fd_allocassoc(int fd, file_t *file, int flags) {
     return 0;
 }
 
-static bool can_send_signal(process_t *proc, int sig) {
+bool can_send_signal(process_t *proc, int sig) {
     if (!current->process->euid) return true;
     if (sig == SIGCONT && proc->group->session == current->process->group->session) return true;
 
@@ -1107,4 +1115,14 @@ process_t *get_session_leader(session_t *session) {
     procent_t *ent = sent(session);
     if (!ent->has_process) return nullptr;
     return &ent->process;
+}
+
+thread_t *resolve_tid(pid_t tid) {
+    procent_t *ent = pidresolve(tid);
+    if (unlikely(!ent) || unlikely(!ent->has_thread)) return nullptr;
+    return &ent->thread;
+}
+
+pid_t proc_to_pid(process_t *proc) {
+    return pent(proc)->id;
 }

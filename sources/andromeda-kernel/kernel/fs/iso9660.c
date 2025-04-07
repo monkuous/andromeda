@@ -1009,6 +1009,7 @@ static void iso9660_fs_free(fs_t *ptr) {
 }
 
 static const fs_ops_t iso9660_fs_ops = {
+        .name = "iso9660",
         .free = iso9660_fs_free,
 };
 

@@ -1,4 +1,4 @@
-From 2a3c093f6c17942e87494adebf7d211af00cd531 Mon Sep 17 00:00:00 2001
+From fef2c3440c276598f19541767fb4f3ff2d2df6e9 Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
@@ -9,7 +9,8 @@ Subject: [PATCH] Add Andromeda port
  options/ansi/include/bits/ansi/time_t.h       |   4 +-
  options/elf/include/elf.h                     |   1 +
  options/internal/include/bits/off_t.h         |   6 +-
- options/internal/x86/setjmp.S                 |   4 +-
+ options/internal/x86/setjmp.S                 |  12 +-
+ options/posix/include/mlibc/posix-sysdeps.hpp |   2 +-
  options/rtld/generic/linker.cpp               |  11 +
  options/rtld/x86/elf.hpp                      |   1 +
  sysdeps/andromeda/crt/Scrt0.S                 |  27 +
@@ -18,11 +19,11 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/crt/crtn.S                  |  12 +
  sysdeps/andromeda/crt/meson.build             |  13 +
  sysdeps/andromeda/generic/entry.cpp           |  17 +
- sysdeps/andromeda/generic/generic.cpp         | 574 ++++++++++++++++++
+ sysdeps/andromeda/generic/generic.cpp         | 823 ++++++++++++++++++
  sysdeps/andromeda/generic/meson.build         |   2 +
- sysdeps/andromeda/generic/mntent.cpp          | 164 +++++
- sysdeps/andromeda/generic/mount.cpp           |  36 ++
- sysdeps/andromeda/generic/syscall.h           |  78 +++
+ sysdeps/andromeda/generic/mntent.cpp          | 164 ++++
+ sysdeps/andromeda/generic/mount.cpp           |  36 +
+ sysdeps/andromeda/generic/syscall.h           |  78 ++
  sysdeps/andromeda/include/abi-bits/access.h   |   1 +
  sysdeps/andromeda/include/abi-bits/auxv.h     |   1 +
  sysdeps/andromeda/include/abi-bits/blkcnt_t.h |   1 +
@@ -56,13 +57,13 @@ Subject: [PATCH] Add Andromeda port
  .../andromeda/include/abi-bits/seek-whence.h  |   1 +
  sysdeps/andromeda/include/abi-bits/shm.h      |   1 +
  sysdeps/andromeda/include/abi-bits/sigevent.h |   1 +
- sysdeps/andromeda/include/abi-bits/signal.h   | 537 ++++++++++++++++
+ sysdeps/andromeda/include/abi-bits/signal.h   | 537 ++++++++++++
  sysdeps/andromeda/include/abi-bits/sigval.h   |   1 +
  sysdeps/andromeda/include/abi-bits/socket.h   |   1 +
  .../andromeda/include/abi-bits/socklen_t.h    |   1 +
  sysdeps/andromeda/include/abi-bits/stat.h     |   1 +
  sysdeps/andromeda/include/abi-bits/statfs.h   |   1 +
- sysdeps/andromeda/include/abi-bits/statvfs.h  |  48 ++
+ sysdeps/andromeda/include/abi-bits/statvfs.h  |  48 +
  sysdeps/andromeda/include/abi-bits/statx.h    |   1 +
  .../andromeda/include/abi-bits/suseconds_t.h  |   1 +
  sysdeps/andromeda/include/abi-bits/termios.h  |   1 +
@@ -73,16 +74,17 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/abi-bits/vt.h       |   1 +
  sysdeps/andromeda/include/abi-bits/wait.h     |   1 +
  sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
- sysdeps/andromeda/include/andromeda/ioctl.h   |   6 +
+ sysdeps/andromeda/include/andromeda/cpu.h     |  34 +
+ sysdeps/andromeda/include/andromeda/ioctl.h   |   9 +
  sysdeps/andromeda/include/andromeda/memory.h  |  16 +
  sysdeps/andromeda/include/andromeda/mount.h   |  15 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
- sysdeps/andromeda/include/andromeda/syscall.h |  59 ++
- sysdeps/andromeda/include/meson.build         |  63 ++
- sysdeps/andromeda/include/mntent.h            |  43 ++
+ sysdeps/andromeda/include/andromeda/syscall.h |  91 ++
+ sysdeps/andromeda/include/meson.build         |  64 ++
+ sysdeps/andromeda/include/mntent.h            |  43 +
  sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 78 files changed, 1907 insertions(+), 12 deletions(-)
+ 80 files changed, 2234 insertions(+), 14 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -144,6 +146,7 @@ Subject: [PATCH] Add Andromeda port
  create mode 120000 sysdeps/andromeda/include/abi-bits/vt.h
  create mode 120000 sysdeps/andromeda/include/abi-bits/wait.h
  create mode 120000 sysdeps/andromeda/include/abi-bits/xattr.h
+ create mode 100644 sysdeps/andromeda/include/andromeda/cpu.h
  create mode 100644 sysdeps/andromeda/include/andromeda/ioctl.h
  create mode 100644 sysdeps/andromeda/include/andromeda/memory.h
  create mode 100644 sysdeps/andromeda/include/andromeda/mount.h
@@ -280,20 +283,41 @@ index 43dcd9ed..277c5b78 100644
  
  #endif /* MLIBC_OFF_T_H */
 diff --git a/options/internal/x86/setjmp.S b/options/internal/x86/setjmp.S
-index d2cd348b..e9f726da 100644
+index d2cd348b..a049f8a7 100644
 --- a/options/internal/x86/setjmp.S
 +++ b/options/internal/x86/setjmp.S
-@@ -17,7 +17,9 @@ __setjmp:
+@@ -17,8 +17,16 @@ __setjmp:
  	xor %eax, %eax
  	ret
  
 -1:
-+1:	call 1f
+-	jmp __sigsetjmp@PLT
++1:	push %ebx
++	call 1f
 +1:	pop %ebx
 +	add $(_GLOBAL_OFFSET_TABLE_ - 1b), %ebx
- 	jmp __sigsetjmp@PLT
++	sub $4, %esp
++	pushl 12(%esp)
++	call __sigsetjmp@PLT
++	add $8, %esp
++	pop %ebx
++	ret
  
  .global setjmp
+ .type setjmp, "function"
+diff --git a/options/posix/include/mlibc/posix-sysdeps.hpp b/options/posix/include/mlibc/posix-sysdeps.hpp
+index 7c526293..a3754973 100644
+--- a/options/posix/include/mlibc/posix-sysdeps.hpp
++++ b/options/posix/include/mlibc/posix-sysdeps.hpp
+@@ -71,7 +71,7 @@ int sys_close(int fd);
+ [[gnu::weak]] int sys_readlink(const char *path, void *buffer, size_t max_size, ssize_t *length);
+ [[gnu::weak]] int sys_readlinkat(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length);
+ [[gnu::weak]] int sys_rmdir(const char *path);
+-[[gnu::weak]] int sys_ftruncate(int fd, size_t size);
++[[gnu::weak]] int sys_ftruncate(int fd, off_t size);
+ [[gnu::weak]] int sys_fallocate(int fd, off_t offset, size_t size);
+ [[gnu::weak]] int sys_unlinkat(int fd, const char *path, int flags);
+ [[gnu::weak]] int sys_openat(int dirfd, const char *path, int flags, mode_t mode, int *fd);
 diff --git a/options/rtld/generic/linker.cpp b/options/rtld/generic/linker.cpp
 index 848f7ded..cd64e9fd 100644
 --- a/options/rtld/generic/linker.cpp
@@ -485,10 +509,10 @@ index 00000000..6e28747f
 +}
 diff --git a/sysdeps/andromeda/generic/generic.cpp b/sysdeps/andromeda/generic/generic.cpp
 new file mode 100644
-index 00000000..e236eebc
+index 00000000..f1547a82
 --- /dev/null
 +++ b/sysdeps/andromeda/generic/generic.cpp
-@@ -0,0 +1,574 @@
+@@ -0,0 +1,823 @@
 +#include "syscall.h"
 +#include <andromeda/ioctl.h>
 +#include <andromeda/string.h>
@@ -1060,6 +1084,255 @@ index 00000000..e236eebc
 +
 +int sys_clone(void *tcb, pid_t *pid_out, void *stack) {
 +	*pid_out = SYSCALL(3, SYS_CREATE_THREAD, thread_entry, tcb, stack).r1;
++	return 0;
++}
++
++int sys_mkdir(const char *path, mode_t mode) { return sys_mkdirat(AT_FDCWD, path, mode); }
++
++int sys_mkdirat(int dirfd, const char *path, mode_t mode) {
++	return sys_mknodat(dirfd, path, (mode & ~S_IFMT) | S_IFDIR, 0);
++}
++
++int sys_mkfifoat(int dirfd, const char *path, mode_t mode) {
++	return sys_mknodat(dirfd, path, (mode & ~S_IFMT) | S_IFIFO, 0);
++}
++
++int sys_mknodat(int dirfd, const char *path, int mode, int dev) {
++	SYSCALL(5, SYS_MKNOD, dirfd, path, strlen(path), mode, dev);
++	return 0;
++}
++
++int sys_statvfs(const char *path, struct statvfs *out) {
++	SYSCALL(4, SYS_STATVFS, AT_FDCWD, path, strlen(path), out);
++	return 0;
++}
++
++int sys_fstatvfs(int fd, struct statvfs *out) {
++	SYSCALL(2, SYS_FSTATVFS, fd, out);
++	return 0;
++}
++
++int sys_ftruncate(int fd, off_t size) {
++	SYSCALL(3, SYS_FTRUNCATE, fd, (unsigned long)size, (unsigned long)(size >> 32));
++	return 0;
++}
++
++pid_t sys_gettid() { return SYSCALL0(SYS_GETTID).r1; }
++
++int sys_getsid(pid_t pid, pid_t *sid) {
++	*sid = SYSCALL(1, SYS_GETSID, pid).r1;
++	return 0;
++}
++
++int sys_getgroups(size_t size, gid_t *list, int *ret) {
++	*ret = SYSCALL(2, SYS_GETGROUPS, list, size).r1;
++	return 0;
++}
++
++void sys_yield() { SYSCALL0(SYS_YIELD); }
++
++int sys_fchdir(int fd) {
++	SYSCALL(1, SYS_CHDIR, fd);
++	return 0;
++}
++
++int sys_link(const char *old_path, const char *new_path) {
++	return sys_linkat(AT_FDCWD, old_path, AT_FDCWD, new_path, 0);
++}
++
++int sys_linkat(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {
++	andromeda_tagged_string_t link_name = {new_path, strlen(new_path)};
++	SYSCALL(6, SYS_LINK, olddirfd, old_path, strlen(old_path), newdirfd, &link_name, flags);
++	return 0;
++}
++
++int sys_symlink(const char *target_path, const char *link_path) {
++	return sys_symlinkat(target_path, AT_FDCWD, link_path);
++}
++
++int sys_symlinkat(const char *target_path, int dirfd, const char *link_path) {
++	SYSCALL(5, SYS_SYMLINK, dirfd, link_path, strlen(link_path), target_path, strlen(target_path));
++	return 0;
++}
++
++// POSIX doesn't require ttyname to error if fd is invalid or not a tty,
++// so this can be implemented entirely in userspace
++int sys_ttyname(int, char *buf, size_t size) {
++	if (size < 9) {
++		return ERANGE;
++	}
++
++	strcpy(buf, "/dev/tty");
++	return 0;
++}
++
++int sys_fadvise(int, off_t, off_t, int) {
++	// Not planned to be implemented
++	return 0;
++}
++
++void sys_sync() {
++	// Andromeda doesn't have read-write disk support, nor does it plan to implement it
++}
++
++int sys_fsync(int fd) {
++	// Andromeda doesn't have read-write disk support, nor does it plan to implement it.
++	// Still have to verify fd is valid, though - just fstat it.
++	struct stat buf;
++	return sys_stat(fsfd_target::fd, fd, nullptr, 0, &buf);
++}
++
++int sys_fdatasync(int fd) { return sys_fsync(fd); }
++
++int sys_chmod(const char *pathname, mode_t mode) {
++	return sys_fchmodat(AT_FDCWD, pathname, mode, 0);
++}
++
++int sys_fchmodat(int fd, const char *pathname, mode_t mode, int flags) {
++	SYSCALL(5, SYS_CHMOD, fd, pathname, strlen(pathname), mode, flags);
++	return 0;
++}
++
++int sys_fchmod(int fd, mode_t mode) {
++	SYSCALL(2, SYS_FCHMOD, fd, mode);
++	return 0;
++}
++
++int sys_setsid(pid_t *sid) {
++	*sid = SYSCALL(0, SYS_SETSID).r1;
++	return 0;
++}
++
++int sys_tcflow(int fd, int action) {
++	int result;
++	return sys_ioctl(fd, TCXONC, reinterpret_cast<void *>(action), &result);
++}
++
++int sys_tcflush(int fd, int queue) {
++	int result;
++	return sys_ioctl(fd, TCFLSH, reinterpret_cast<void *>(queue), &result);
++}
++
++int sys_tcdrain(int fd) {
++	int result;
++	return sys_ioctl(fd, TCSBRK, reinterpret_cast<void *>(1), &result);
++}
++
++static int do_poll(
++    struct pollfd *fds,
++    nfds_t count,
++    const struct timespec *timeout,
++    const sigset_t *sigmask,
++    int *num_events
++) {
++	*num_events = SYSCALL(4, SYS_POLL, fds, count, timeout, sigmask).r1;
++	return 0;
++}
++
++int sys_poll(struct pollfd *fds, nfds_t count, int timeout, int *num_events) {
++	if (timeout >= 0) {
++		struct timespec spec = {.tv_sec = timeout, .tv_nsec = 0};
++		return do_poll(fds, count, &spec, nullptr, num_events);
++	} else {
++		return do_poll(fds, count, nullptr, nullptr, num_events);
++	}
++}
++
++int sys_umask(mode_t mode, mode_t *old) {
++	*old = SYSCALL(1, SYS_UMASK, mode).r1;
++	return 0;
++}
++
++int sys_tgkill(int tgid, int tid, int sig) {
++	SYSCALL(3, SYS_TGKILL, tgid, tid, sig);
++	return 0;
++}
++
++int sys_fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
++	SYSCALL(6, SYS_CHOWN, dirfd, pathname, strlen(pathname), owner, group, flags);
++	return 0;
++}
++
++int sys_sigaltstack(const stack_t *ss, stack_t *oss) {
++	SYSCALL(2, SYS_SIGALTSTACK, ss, oss);
++	return 0;
++}
++
++int sys_sigsuspend(const sigset_t *set) {
++	SYSCALL(1, SYS_SIGSUSPEND, set);
++	return 0;
++}
++
++int sys_sigpending(sigset_t *set) {
++	SYSCALL(1, SYS_SIGPENDING, set);
++	return 0;
++}
++
++int sys_setgroups(size_t size, const gid_t *list) {
++	SYSCALL(2, SYS_SETGROUPS, list, size);
++	return 0;
++}
++
++int sys_pause() {
++	SYSCALL(0, SYS_PAUSE);
++	return 0;
++}
++
++int sys_setresuid(uid_t ruid, uid_t euid, uid_t suid) {
++	SYSCALL(3, SYS_SETRESUID, ruid, euid, suid);
++	return 0;
++}
++
++int sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
++	SYSCALL(3, SYS_SETRESGID, rgid, egid, sgid);
++	return 0;
++}
++
++int sys_getresuid(uid_t *ruid, uid_t *euid, uid_t *suid) {
++	uid_t ids[3];
++	SYSCALL(1, SYS_GETRESUID, ids);
++	*ruid = ids[0];
++	*euid = ids[1];
++	*suid = ids[2];
++	return 0;
++}
++
++int sys_getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid) {
++	gid_t ids[3];
++	SYSCALL(1, SYS_GETRESGID, ids);
++	*rgid = ids[0];
++	*egid = ids[1];
++	*sgid = ids[2];
++	return 0;
++}
++
++int sys_setreuid(uid_t ruid, uid_t euid) {
++	SYSCALL(2, SYS_SETREUID, ruid, euid);
++	return 0;
++}
++
++int sys_setregid(gid_t rgid, gid_t egid) {
++	SYSCALL(2, SYS_SETREGID, rgid, egid);
++	return 0;
++}
++
++int sys_setuid(uid_t uid) {
++	SYSCALL(1, SYS_SETUID, uid);
++	return 0;
++}
++
++int sys_seteuid(uid_t euid) {
++	SYSCALL(1, SYS_SETEUID, euid);
++	return 0;
++}
++
++int sys_setgid(gid_t gid) {
++	SYSCALL(1, SYS_SETGID, gid);
++	return 0;
++}
++
++int sys_setegid(gid_t egid) {
++	SYSCALL(1, SYS_SETEGID, egid);
 +	return 0;
 +}
 +}; // namespace mlibc
@@ -2358,18 +2631,61 @@ index 00000000..66412d70
 @@ -0,0 +1 @@
 +../../../../abis/linux/xattr.h
 \ No newline at end of file
+diff --git a/sysdeps/andromeda/include/andromeda/cpu.h b/sysdeps/andromeda/include/andromeda/cpu.h
+new file mode 100644
+index 00000000..50b967ff
+--- /dev/null
++++ b/sysdeps/andromeda/include/andromeda/cpu.h
+@@ -0,0 +1,34 @@
++#ifndef _ANDROMEDA_CPU_H
++#define _ANDROMEDA_CPU_H
++
++#include <stdint.h>
++
++typedef struct {
++    uint32_t ldt;
++    uint32_t eax;
++    uint32_t ebx;
++    uint32_t ecx;
++    uint32_t edx;
++    uint32_t esi;
++    uint32_t edi;
++    uint32_t ebp;
++    uint32_t eflags;
++    uint32_t ds;
++    uint32_t es;
++    uint32_t fs;
++    uint32_t gs;
++    uint32_t ss;
++    uint32_t esp;
++    uint32_t eip;
++    uint32_t cs;
++    struct {
++        uint16_t pad;
++        uint16_t limit;
++        uint32_t base;
++    } gdtr;
++} andromeda_cpu_regs_t;
++
++/* Note that this also disables paging, so your addresses have to be physical ones */
++#define IOCTL_SET_REGISTERS 0x20000
++
++#endif /* _ANDROMEDA_CPU_H */
 diff --git a/sysdeps/andromeda/include/andromeda/ioctl.h b/sysdeps/andromeda/include/andromeda/ioctl.h
 new file mode 100644
-index 00000000..603a6e10
+index 00000000..5308bd64
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/ioctl.h
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,9 @@
 +#pragma once
 +
 +#define TCGETS 0x5401
 +#define TCSETS 0x5402
 +#define TCSETSW 0x5403
 +#define TCSETSF 0x5404
++#define TCSBRK 0x5409
++#define TCXONC 0x540a
++#define TCFLSH 0x540b
 diff --git a/sysdeps/andromeda/include/andromeda/memory.h b/sysdeps/andromeda/include/andromeda/memory.h
 new file mode 100644
 index 00000000..caa8e35e
@@ -2432,10 +2748,10 @@ index 00000000..58bac89d
 +#endif /* _ANDROMEDA_STRING_H */
 diff --git a/sysdeps/andromeda/include/andromeda/syscall.h b/sysdeps/andromeda/include/andromeda/syscall.h
 new file mode 100644
-index 00000000..01deaff8
+index 00000000..03c21367
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/syscall.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,91 @@
 +#ifndef _ANDROMEDA_SYSCALL_H
 +#define _ANDROMEDA_SYSCALL_H
 +
@@ -2493,14 +2809,46 @@ index 00000000..01deaff8
 +#define SYS_CREATE_THREAD 51
 +#define SYS_MOUNT 52
 +#define SYS_UMOUNT 53
++#define SYS_MKNOD 54
++#define SYS_STATVFS 55
++#define SYS_FSTATVFS 56
++#define SYS_FTRUNCATE 57
++#define SYS_GETTID 58
++#define SYS_GETSID 59
++#define SYS_GETGROUPS 60
++#define SYS_YIELD 61
++#define SYS_LINK 62
++#define SYS_SYMLINK 63
++#define SYS_CHMOD 64
++#define SYS_FCHMOD 65
++#define SYS_SETSID 66
++#define SYS_POLL 67
++#define SYS_UMASK 68
++#define SYS_TGKILL 69
++#define SYS_CHOWN 70
++#define SYS_SIGALTSTACK 71
++#define SYS_SIGSUSPEND 72
++#define SYS_SIGPENDING 73
++#define SYS_SETGROUPS 74
++#define SYS_PAUSE 75
++#define SYS_SETRESUID 76
++#define SYS_SETRESGID 77
++#define SYS_GETRESUID 78
++#define SYS_GETRESGID 79
++#define SYS_SETREUID 80
++#define SYS_SETREGID 81
++#define SYS_SETUID 82
++#define SYS_SETEUID 83
++#define SYS_SETGID 84
++#define SYS_SETEGID 85
 +
 +#endif /* _ANDROMEDA_SYSCALL_H */
 diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build
 new file mode 100644
-index 00000000..c1e6b46b
+index 00000000..d41608a4
 --- /dev/null
 +++ b/sysdeps/andromeda/include/meson.build
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,64 @@
 +if not no_headers
 +    install_headers(
 +        'abi-bits/access.h',
@@ -2553,6 +2901,7 @@ index 00000000..c1e6b46b
 +        'abi-bits/vt.h',
 +        'abi-bits/wait.h',
 +        'abi-bits/xattr.h',
++        'andromeda/cpu.h',
 +        'andromeda/ioctl.h',
 +        'andromeda/memory.h',
 +        'andromeda/mount.h',

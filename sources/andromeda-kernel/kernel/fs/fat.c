@@ -507,7 +507,7 @@ static void fatfs_free(fs_t *ptr) {
     vmfree(self, sizeof(*self));
 }
 
-static const fs_ops_t fatfs_ops = {.free = fatfs_free};
+static const fs_ops_t fatfs_ops = {.name = "fat", .free = fatfs_free};
 
 typedef struct [[gnu::packed]] {
     uint8_t drive;

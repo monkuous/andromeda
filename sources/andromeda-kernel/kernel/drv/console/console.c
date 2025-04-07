@@ -27,6 +27,7 @@ static unsigned char *input_buf;
 static size_t input_cap;
 static size_t input_cnt;
 static size_t line_len;
+static bool input_enabled = true;
 
 static list_t input_waiting;
 static list_t output_waiting;
@@ -78,6 +79,8 @@ struct console_read_op_ctx {
 };
 
 static size_t input_available() {
+    if (!input_enabled) return 0;
+
     if (termios.c_lflag & ICANON) {
         return line_len;
     } else if (input_cnt < termios.c_cc[VMIN]) {
@@ -424,6 +427,27 @@ static int console_ioctl(file_t *, unsigned long request, void *arg) {
         on_change_controller();
         return 0;
     }
+    case TCXONC:
+        switch ((uintptr_t)arg) {
+        case TCOOFF: output_enabled = false; break;
+        case TCOON: restart_output(); break;
+        case TCIOFF: input_enabled = false; break;
+        case TCION:
+            input_enabled = true;
+            maybe_wake_readers();
+            break;
+        default: return -EINVAL;
+        }
+        return 0;
+    case TCFLSH:
+        switch ((uintptr_t)arg) {
+        case TCIFLUSH:
+        case TCIOFLUSH: input_cnt = line_len = echo_count = 0; break;
+        case TCOFLUSH: break;
+        default: return -EINVAL;
+        }
+        return 0;
+    case TCSBRK: return 0;
     default: printk("console: unknown ioctl 0x%x with arg %p\n", request, arg); return -ENOTTY;
     }
 }

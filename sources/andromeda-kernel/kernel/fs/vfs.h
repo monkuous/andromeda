@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 
 #define FL_STATUS_FLAGS (O_PATH | O_APPEND | O_DSYNC | O_NONBLOCK | O_RSYNC | O_SYNC)
@@ -86,6 +87,7 @@ struct file {
 };
 
 typedef struct {
+    char name[FSTYPSZ];
     void (*free)(fs_t *self);
 } fs_ops_t;
 
@@ -152,6 +154,7 @@ typedef struct {
     list_t write_waiting;
     list_t open_read_waiting;
     list_t open_write_waiting;
+    list_t poll_waiting;
     bool has_data;
 } fifo_state_t;
 
@@ -230,6 +233,8 @@ int vfs_chown(file_t *rel, const void *path, size_t length, uid_t uid, gid_t gid
 int vfs_fchown(file_t *file, uid_t uid, gid_t gid);
 int vfs_chmod(file_t *rel, const void *path, size_t length, mode_t mode, int flags);
 int vfs_fchmod(file_t *file, mode_t mode);
+int vfs_statvfs(file_t *rel, const void *path, size_t length, struct statvfs *out);
+int vfs_fstatvfs(file_t *file, struct statvfs *out);
 
 off_t vfs_seek(file_t *file, off_t offset, int whence);
 ssize_t vfs_read(file_t *file, void *buffer, ssize_t size);

@@ -28,7 +28,13 @@
 #define MODE_BITS (S_ISUID | S_ISGID | S_ISVTX | PERM_BITS)
 
 static dentry_t root_dentry = {.references = 1};
-static fs_t anon_fs = {.device = DEVICE_ID(DRIVER_PSEUDO_FS, 0), .block_size = PAGE_SIZE, .max_name_len = NAME_MAX};
+static const fs_ops_t anon_fs_ops = {.name = "anonymous"};
+static fs_t anon_fs = {
+        .ops = &anon_fs_ops,
+        .device = DEVICE_ID(DRIVER_PSEUDO_FS, 0),
+        .block_size = PAGE_SIZE,
+        .max_name_len = NAME_MAX
+};
 static ino_t anon_ino = 1;
 
 static list_t dentry_lru;
@@ -136,7 +142,7 @@ void dentry_deref(dentry_t *entry) {
         // TODO: Enable dentry caching by changing this back to list_insert_tail.
         // This is not currently done because, without the ability to reclaim
         // free memory owned by kmalloc, it would result in a giant memory leak.
-        //list_insert_tail(&dentry_lru, &entry->lru_node);
+        // list_insert_tail(&dentry_lru, &entry->lru_node);
         free_dentry(entry);
     }
 }
@@ -343,11 +349,19 @@ static int regular_poll(file_t *) {
     return POLLIN | POLLRDNORM | POLLRDBAND | POLLPRI | POLLOUT | POLLWRNORM | POLLWRBAND;
 }
 
+static void regular_poll_submit(file_t *, poll_waiter_t *) {
+}
+
+static void regular_poll_cancel(file_t *, poll_waiter_t *) {
+}
+
 static const file_ops_t regular_file_ops = {
         .seek = regular_seek,
         .read = regular_read,
         .write = regular_write,
         .poll = regular_poll,
+        .poll_submit = regular_poll_submit,
+        .poll_cancel = regular_poll_cancel
 };
 
 int access_file(file_t *file, int amode) {
@@ -397,6 +411,10 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
                     error = ENXIO;
                 } else if (inode->fifo.num_writers++ == 0) {
                     list_foreach(inode->fifo.open_read_waiting, fifo_open_wait_ctx_t, node, cur) {
+                        sched_unblock(cur->thread);
+                    }
+
+                    list_foreach(inode->fifo.poll_waiting, poll_waiter_t, node, cur) {
                         sched_unblock(cur->thread);
                     }
                 }
@@ -1381,6 +1399,40 @@ int vfs_chmod(file_t *rel, const void *path, size_t length, mode_t mode, int fla
 
 int vfs_fchmod(file_t *file, mode_t mode) {
     return chmod_inode(file->inode, mode);
+}
+
+static int statvfs_inode(inode_t *inode, struct statvfs *out) {
+    fs_t *fs = inode->filesystem;
+
+    struct statvfs value = {
+            .f_bsize = fs->block_size,
+            .f_blocks = fs->blocks,
+            .f_bfree = fs->bfree,
+            .f_bavail = fs->bfree,
+            .f_files = fs->files,
+            .f_ffree = fs->ffree,
+            .f_favail = fs->ffree,
+            .f_fsid = fs->id,
+            .f_flag = fs->flags,
+            .f_namemax = fs->max_name_len,
+    };
+    memcpy(value.f_basetype, fs->ops->name, sizeof(value.f_basetype));
+
+    return -user_memcpy(out, &value, sizeof(value));
+}
+
+int vfs_statvfs(file_t *rel, const void *path, size_t length, struct statvfs *out) {
+    dentry_t *entry;
+    int error = fresolve(&entry, rel, path, length, RESOLVE_MUST_EXIST | RESOLVE_NO_RO_FS | RESOLVE_FOLLOW_SYMLINKS);
+    if (unlikely(error)) return error;
+
+    error = statvfs_inode(entry->inode, out);
+    dentry_deref(entry);
+    return error;
+}
+
+int vfs_fstatvfs(file_t *file, struct statvfs *out) {
+    return statvfs_inode(file->inode, out);
 }
 
 off_t vfs_seek(file_t *file, off_t offset, int whence) {

@@ -10,6 +10,7 @@
 #include "util/list.h"
 #include "util/panic.h"
 #include <errno.h>
+#include <sys/poll.h>
 
 void fifo_init(inode_t *inode) {
     inode->fifo.buffer = vmalloc(PIPE_BUF);
@@ -268,9 +269,31 @@ void fifo_no_writers(inode_t *inode) {
     }
 }
 
+static int fifo_poll(file_t *self) {
+    inode_t *inode = self->inode;
+    int value = 0;
+
+    if (fifo_count(&inode->fifo)) value |= POLLIN | POLLRDNORM | POLLRDBAND | POLLPRI;
+    if (fifo_free(&inode->fifo)) value |= POLLOUT | POLLWRNORM | POLLWRBAND;
+    if (!inode->fifo.num_writers) value |= POLLHUP;
+
+    return value;
+}
+
+static void fifo_poll_submit(file_t *self, poll_waiter_t *waiter) {
+    list_insert_tail(&self->inode->fifo.poll_waiting, &waiter->node);
+}
+
+static void fifo_poll_cancel(file_t *self, poll_waiter_t *waiter) {
+    list_remove(&self->inode->fifo.poll_waiting, &waiter->node);
+}
+
 const file_ops_t fifo_ops = {
         .read = fifo_read,
         .write = fifo_write,
+        .poll = fifo_poll,
+        .poll_cancel = fifo_poll_cancel,
+        .poll_submit = fifo_poll_submit,
 };
 
 void fifo_open_read_cont(void *ptr) {

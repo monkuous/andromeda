@@ -228,6 +228,7 @@ static void ramfs_free(fs_t *self) {
 }
 
 static const fs_ops_t ramfs_ops = {
+        .name = "ramfs",
         .free = ramfs_free,
 };
 

@@ -176,5 +176,11 @@ uint8_t screen_map_unicode(uint32_t unicode) {
         }
     }
 
-    return 0x3f;
+    // special case some characters that aren't encodable in CP437
+    // but have a closely matching equivalent
+    switch (unicode) {
+    case 0x2018:
+    case 0x2019: return '\'';
+    default: return '?';
+    }
 }

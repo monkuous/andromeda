@@ -13,6 +13,7 @@
 #include "string.h"
 #include "sys/syscall.h"
 #include "util/list.h"
+#include <andromeda/string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -342,7 +343,11 @@ static void pselect_cont(void *ptr) {
         set_syscall_result(-EINTR);
     } else {
         int count = pselect_run(ctx);
-        if (count == 0) return;
+        if (count == 0) {
+            sched_block(pselect_cont, ctx, true);
+            return;
+        }
+
         set_syscall_result(count);
     }
 
@@ -441,30 +446,31 @@ int sys_PSELECT(
 
     if (ctx->rbits) {
         error = -user_memcpy(ctx->rbits, (const void *)readfds, input_size);
-        if (unlikely(error)) goto cleanup;
+        if (unlikely(error)) goto exit;
     }
 
     if (ctx->wbits) {
         error = -user_memcpy(ctx->wbits, (const void *)writefds, input_size);
-        if (unlikely(error)) goto cleanup;
+        if (unlikely(error)) goto exit;
     }
 
     if (ctx->ebits) {
         error = -user_memcpy(ctx->ebits, (const void *)errorfds, input_size);
-        if (unlikely(error)) goto cleanup;
+        if (unlikely(error)) goto exit;
     }
 
     for (size_t i = 0; i < (unsigned)nfds; i++) {
         if (should_check(ctx->rbits, i) || should_check(ctx->wbits, i) || should_check(ctx->ebits, i)) {
             error = -fd_lookup(&ctx->files[i], i);
-            if (unlikely(error)) goto cleanup;
+            if (unlikely(error)) goto exit;
             ctx->count = i + 1;
         }
     }
 
-    int count = pselect_run(ctx);
+    current->signal_mask = mask;
+    error = pselect_run(ctx);
 
-    if (count == 0 && (timeout == 0 || time.tv_sec != 0 || time.tv_nsec != 0)) {
+    if (error == 0 && (timeout == 0 || time.tv_sec != 0 || time.tv_nsec != 0)) {
         for (size_t i = 0; i < ctx->count; i++) {
             file_t *file = ctx->files[i];
 
@@ -473,15 +479,13 @@ int sys_PSELECT(
             }
         }
 
-        current->signal_mask = mask;
         // TODO: Timeout
         sched_block(pselect_cont, ctx, true);
-    } else {
-        pselect_ctx_free(ctx);
+        return 0;
     }
 
-    return count;
-cleanup:
+exit:
+    current->signal_mask = ctx->orig_mask;
     pselect_ctx_free(ctx);
     return error;
 }
@@ -787,6 +791,356 @@ int sys_UMOUNT(int dirfd, uintptr_t path, size_t length) {
     if (unlikely(error)) goto exit;
 
     error = -vfs_unmount(rel, buf, length);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_MKNOD(int dirfd, uintptr_t path, size_t length, mode_t mode, dev_t device) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_mknod(rel, buf, length, mode, device);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_STATVFS(int dirfd, uintptr_t path, size_t length, uintptr_t buffer) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer(buffer, sizeof(struct statvfs));
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_statvfs(rel, buf, length, (struct statvfs *)buffer);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_FSTATVFS(int fd, uintptr_t buffer) {
+    int error = -verify_pointer(buffer, sizeof(struct statvfs));
+    if (unlikely(error)) return error;
+
+    file_t *file;
+    error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    error = -vfs_fstatvfs(file, (struct statvfs *)buffer);
+    file_deref(file);
+    return error;
+}
+
+int sys_FTRUNCATE(int fd, uint32_t size_low, uint32_t size_high) {
+    off_t size = ((uint64_t)size_high << 32) | size_low;
+
+    file_t *file;
+    int error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    error = -vfs_ftruncate(file, size);
+    file_deref(file);
+    return error;
+}
+
+int sys_LINK(int tdirfd, uintptr_t tpath, size_t tlength, int ldirfd, uintptr_t lpath, int flags) {
+    int error = -verify_pointer(tpath, tlength);
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer(lpath, sizeof(andromeda_tagged_string_t));
+    if (unlikely(error)) return error;
+
+    andromeda_tagged_string_t link_path;
+    error = -user_memcpy(&link_path, (const void *)lpath, sizeof(link_path));
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer((uintptr_t)link_path.data, link_path.length);
+    if (unlikely(error)) return error;
+
+    void *tbuf = vmalloc(tlength);
+    error = -user_memcpy(tbuf, (const void *)tpath, tlength);
+    if (unlikely(error)) goto exit;
+
+    void *lbuf = vmalloc(link_path.length);
+    error = -user_memcpy(lbuf, link_path.data, link_path.length);
+    if (unlikely(error)) goto exit2;
+
+    file_t *trel;
+    error = -get_at_file(&trel, tdirfd);
+    if (unlikely(error)) goto exit2;
+
+    file_t *lrel;
+    error = -get_at_file(&lrel, ldirfd);
+    if (unlikely(error)) goto exit3;
+
+    error = -vfs_link(lrel, lbuf, link_path.length, trel, tbuf, tlength, flags);
+
+    if (lrel) file_deref(lrel);
+exit3:
+    if (trel) file_deref(trel);
+exit2:
+    vmfree(lbuf, tlength);
+exit:
+    vmfree(tbuf, tlength);
+    return error;
+}
+
+int sys_SYMLINK(int dirfd, uintptr_t path, size_t length, uintptr_t tpath, size_t tlength) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    error = -verify_pointer(tpath, tlength);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    void *tbuf = vmalloc(tlength);
+    error = -user_memcpy(tbuf, (const void *)tpath, tlength);
+    if (unlikely(error)) goto exit2;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit2;
+
+    error = -vfs_symlink(rel, buf, length, tbuf, tlength);
+
+    if (rel) file_deref(rel);
+exit2:
+    vmfree(tbuf, tlength);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_CHMOD(int dirfd, uintptr_t path, size_t length, mode_t mode, int flags) {
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_chmod(rel, buf, length, mode, flags);
+    if (rel) file_deref(rel);
+exit:
+    vmfree(buf, length);
+    return error;
+}
+
+int sys_FCHMOD(int fd, mode_t mode) {
+    file_t *file;
+    int error = -fd_lookup(&file, fd);
+    if (unlikely(error)) return error;
+
+    error = -vfs_fchmod(file, mode);
+    file_deref(file);
+    return error;
+}
+
+struct poll_ctx {
+    poll_waiter_t base;
+    uintptr_t output;
+    struct pollfd *fds;
+    file_t **files;
+    size_t count;
+    size_t bufsz;
+    sigset_t mask;
+};
+
+static int run_poll(struct poll_ctx *ctx) {
+    int count = 0;
+
+    for (size_t i = 0; i < ctx->count; i++) {
+        file_t *file = ctx->files[i];
+        if (!file || !file->ops->poll) continue;
+
+        struct pollfd *fd = &ctx->fds[i];
+        fd->revents = file->ops->poll(file) & (fd->events | POLLERR | POLLHUP);
+
+        if (fd->revents) {
+            count += 1;
+        }
+    }
+
+    int error = -user_memcpy((void *)ctx->output, ctx->fds, ctx->count * sizeof(*ctx->fds));
+    if (unlikely(error)) return error;
+
+    return count;
+}
+
+static void poll_cleanup(struct poll_ctx *ctx) {
+    for (size_t i = 0; i < ctx->count; i++) {
+        if (ctx->files[i]) file_deref(ctx->files[i]);
+    }
+
+    vmfree(ctx, ctx->bufsz);
+}
+
+static void poll_cont(void *ptr) {
+    struct poll_ctx *ctx = ptr;
+
+    if (current->wake_reason == WAKE_INTERRUPT) {
+        set_syscall_result(-EINTR);
+    } else {
+        int count = run_poll(ctx);
+        if (count == 0) {
+            sched_block(poll_cont, ctx, true);
+            return;
+        }
+
+        set_syscall_result(count);
+    }
+
+    for (size_t i = 0; i < ctx->count; i++) {
+        file_t *file = ctx->files[i];
+
+        if (file && file->ops->poll) {
+            file->ops->poll_cancel(file, &ctx->base);
+        }
+    }
+
+    poll_cleanup(ctx);
+}
+
+int sys_POLL(uintptr_t fds, size_t count, uintptr_t timeout, uintptr_t sigmask) {
+    struct timespec tmspec;
+    sigset_t smset;
+
+    size_t fds_size = count * sizeof(struct pollfd);
+    int error = -verify_pointer(fds, fds_size);
+    if (unlikely(error)) return error;
+
+    if (timeout) {
+        error = -verify_pointer(timeout, sizeof(tmspec));
+        if (unlikely(error)) return error;
+
+        error = -user_memcpy(&tmspec, (const void *)timeout, sizeof(tmspec));
+        if (unlikely(error)) return error;
+    }
+
+    if (sigmask) {
+        error = -verify_pointer(sigmask, sizeof(smset));
+        if (unlikely(error)) return error;
+
+        error = -user_memcpy(&smset, (const void *)sigmask, sizeof(smset));
+        if (unlikely(error)) return error;
+        sigset_sanitize(&smset);
+    }
+
+    size_t fds_offs = (sizeof(struct poll_ctx) + (alignof(struct pollfd) - 1)) & ~(alignof(struct pollfd) - 1);
+    size_t fls_offs = (fds_offs + fds_size + (alignof(file_t *) - 1)) & ~(alignof(file_t *) - 1);
+    size_t fls_size = count * sizeof(file_t *);
+    size_t buf_size = fls_offs + fls_size;
+
+    void *buffer = vmalloc(buf_size);
+    memset(buffer, 0, buf_size);
+
+    struct poll_ctx *ctx = buffer;
+    ctx->base.thread = current;
+    ctx->output = fds;
+    ctx->fds = buffer + fds_offs;
+    ctx->files = buffer + fls_offs;
+    ctx->count = count;
+    ctx->bufsz = buf_size;
+    ctx->mask = current->signal_mask;
+
+    error = -user_memcpy(ctx->fds, (const void *)fds, fds_size);
+    if (unlikely(error)) goto exit;
+
+    for (size_t i = 0; i < ctx->count; i++) {
+        int fd = ctx->fds[i].fd;
+        ctx->fds[i].revents = 0;
+        if (fd < 0) continue;
+
+        file_t *file;
+        int error = -fd_lookup(&file, fd);
+
+        if (unlikely(error)) {
+            ctx->files[i] = nullptr;
+            ctx->fds[i].revents |= POLLNVAL;
+            continue;
+        }
+
+        ctx->files[i] = file;
+    }
+
+    if (sigmask) current->signal_mask = smset;
+
+    error = run_poll(ctx);
+
+    if (error == 0 && (!timeout || (tmspec.tv_sec == 0 && tmspec.tv_nsec == 0))) {
+        for (size_t i = 0; i < ctx->count; i++) {
+            file_t *file = ctx->files[i];
+
+            if (file && file->ops->poll) {
+                file->ops->poll_submit(file, &ctx->base);
+            }
+        }
+
+        // TODO: Timeout
+        sched_block(poll_cont, ctx, true);
+        return 0;
+    }
+
+exit:
+    current->signal_mask = ctx->mask;
+    poll_cleanup(ctx);
+    return error;
+}
+
+mode_t sys_UMASK(mode_t mode) {
+    return vfs_umask(mode);
+}
+
+int sys_CHOWN(int dirfd, uintptr_t path, size_t length, uid_t uid, gid_t gid, int flags) {
+    if (flags & AT_EMPTY_PATH) {
+        file_t *file;
+        int error = -fd_lookup(&file, dirfd);
+        if (unlikely(error)) return error;
+
+        error = -vfs_fchown(file, uid, gid);
+        file_deref(file);
+        return error;
+    }
+
+    int error = -verify_pointer(path, length);
+    if (unlikely(error)) return error;
+
+    void *buf = vmalloc(length);
+    error = -user_memcpy(buf, (const void *)path, length);
+    if (unlikely(error)) goto exit;
+
+    file_t *rel;
+    error = -get_at_file(&rel, dirfd);
+    if (unlikely(error)) goto exit;
+
+    error = -vfs_chown(rel, buf, length, uid, gid, flags);
     if (rel) file_deref(rel);
 exit:
     vmfree(buf, length);

@@ -36,3 +36,15 @@ int sys_UNLINK(int dirfd, uintptr_t path, size_t length, int flags);
 int sys_RENAME(int srcdirfd, uintptr_t srcpath, size_t srclength, int dstdirfd, uintptr_t dstpath, size_t dstlength);
 int sys_MOUNT(int srcdirfd, uintptr_t srcpath, size_t srclength, int dirfd, uintptr_t path, size_t length);
 int sys_UMOUNT(int dirfd, uintptr_t path, size_t length);
+int sys_MKNOD(int dirfd, uintptr_t path, size_t length, mode_t mode, dev_t device);
+int sys_STATVFS(int dirfd, uintptr_t path, size_t length, uintptr_t buffer);
+int sys_FSTATVFS(int fd, uintptr_t buffer);
+int sys_FTRUNCATE(int fd, uint32_t size_low, uint32_t size_high);
+int sys_LINK(int tdirfd, uintptr_t tpath, size_t tlength, int ldirfd, uintptr_t lpath, int flags);
+int sys_SYMLINK(int dirfd, uintptr_t path, size_t length, uintptr_t target, size_t tlen);
+int sys_CHMOD(int dirfd, uintptr_t path, size_t length, mode_t mode, int flags);
+int sys_FCHMOD(int fd, mode_t mode);
+int sys_POLL(uintptr_t fds, size_t count, uintptr_t timeout, uintptr_t sigmask);
+mode_t sys_UMASK(mode_t mode);
+int sys_CHOWN(int dirfd, uintptr_t path, size_t length, uid_t uid, gid_t gid, int flags);
+

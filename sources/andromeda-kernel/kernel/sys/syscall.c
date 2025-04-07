@@ -6,6 +6,7 @@
 #include "sys/memory.h"  /* IWYU pragma: keep */
 #include "sys/misc.h"    /* IWYU pragma: keep */
 #include "sys/process.h" /* IWYU pragma: keep*/
+#include "sys/sched.h"   /* IWYU pragma: keep */
 #include "sys/system.h"  /* IWYU pragma: keep */
 #include "sys/thread.h"  /* IWYU pragma: keep */
 #include <andromeda/syscall.h>
@@ -155,6 +156,38 @@ void handle_syscall(idt_frame_t *frame) {
         SYSHANDLER32(CREATE_THREAD, 3)
         SYSHANDLER32(MOUNT, 6)
         SYSHANDLER32(UMOUNT, 3)
+        SYSHANDLER32(MKNOD, 5)
+        SYSHANDLER32(STATVFS, 4)
+        SYSHANDLER32(FSTATVFS, 2)
+        SYSHANDLER32(FTRUNCATE, 3)
+        SYSHANDLER32(GETTID, 0)
+        SYSHANDLER32(GETSID, 1)
+        SYSHANDLER32(GETGROUPS, 2)
+        SYSHANDLER32(YIELD, 0)
+        SYSHANDLER32(LINK, 6)
+        SYSHANDLER32(SYMLINK, 5)
+        SYSHANDLER32(CHMOD, 5)
+        SYSHANDLER32(FCHMOD, 2)
+        SYSHANDLER32(SETSID, 0)
+        SYSHANDLER32(POLL, 4)
+        SYSHANDLER32(UMASK, 1)
+        SYSHANDLER32(TGKILL, 3)
+        SYSHANDLER32(CHOWN, 6)
+        SYSHANDLER32(SIGALTSTACK, 2)
+        SYSHANDLER32(SIGSUSPEND, 1)
+        SYSHANDLER32(SIGPENDING, 1)
+        SYSHANDLER32(SETGROUPS, 2)
+        SYSHANDLER32(PAUSE, 0)
+        SYSHANDLER32(SETRESUID, 3)
+        SYSHANDLER32(SETRESGID, 3)
+        SYSHANDLER32(GETRESUID, 1)
+        SYSHANDLER32(GETRESGID, 1)
+        SYSHANDLER32(SETREUID, 2)
+        SYSHANDLER32(SETREGID, 2)
+        SYSHANDLER32(SETUID, 1)
+        SYSHANDLER32(SETEUID, 1)
+        SYSHANDLER32(SETGID, 1)
+        SYSHANDLER32(SETEGID, 1)
     default:
 #if LOG_SYSCALLS
         printk("syscall: unknown syscall %u\n", frame->eax);
