@@ -4,6 +4,7 @@
 #include "drv/console/vt.h"
 #include "drv/device.h"
 #include "fs/vfs.h"
+#include "init/bios.h"
 #include "mem/usermem.h"
 #include "mem/vmalloc.h"
 #include "proc/process.h"
@@ -448,6 +449,23 @@ static int console_ioctl(file_t *, unsigned long request, void *arg) {
         }
         return 0;
     case TCSBRK: return 0;
+    case IOCTL_GET_MODIFIER_STATE: {
+        regs_t regs = {.eax = 0x200};
+        intcall(0x16, &regs);
+
+        int flags = 0;
+
+        if (regs.eax & 1) flags |= MODIFIER_RIGHT_SHIFT;
+        if (regs.eax & 2) flags |= MODIFIER_LEFT_SHIFT;
+        if (regs.eax & 4) flags |= MODIFIER_CONTROL;
+        if (regs.eax & 8) flags |= MODIFIER_ALT;
+        if (regs.eax & 16) flags |= MODIFIER_SCROLL_LOCK;
+        if (regs.eax & 32) flags |= MODIFIER_NUM_LOCK;
+        if (regs.eax & 64) flags |= MODIFIER_CAPS_LOCK;
+        if (regs.eax & 128) flags |= MODIFIER_INSERT;
+
+        return flags;
+    }
     default: printk("console: unknown ioctl 0x%x with arg %p\n", request, arg); return -ENOTTY;
     }
 }
