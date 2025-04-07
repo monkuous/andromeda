@@ -3,6 +3,7 @@
 #include "fs/vfs.h"
 #include "mem/usermem.h"
 #include "sys/syscall.h"
+#include "util/reset.h"
 #include <andromeda/cpu.h>
 #include <errno.h>
 #include <stdint.h>
@@ -21,6 +22,7 @@ static int cpu_ioctl(file_t *, unsigned long request, void *arg) {
 
         cpu_set_registers(&regs);
     }
+    case IOCTL_REBOOT: reset_system(); return 0;
     default: return -ENOTTY;
     }
 }
