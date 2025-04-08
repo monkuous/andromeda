@@ -1,0 +1,27 @@
+packages:
+  - name: gmp
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: 'ports'
+      url: 'https://ftpmirror.gnu.org/gmp/gmp-6.3.0.tar.xz'
+      checksum: 'blake2b:a865129e2b3f634ec5bad7f97ed89532e43f5662ac47a7d8ab7f0df8c9f8d0886bd984651422e2573c2163bca69c0547c248147ec90880accbd53db97dc0ddee'
+      format: 'tar.xz'
+      extract_path: 'gmp-6.3.0'
+      version: '6.3.0'
+      tools_required:
+        - autoconf
+        - automake
+        - libtool
+        - pkgconf
+      regenerate:
+        - args: ['@SOURCE_ROOT@/support/autoconf/regenerate.sh']
+    tools_required:
+      - gcc
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--prefix=/usr'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']

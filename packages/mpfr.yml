@@ -1,0 +1,31 @@
+packages:
+  - name: mpfr
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: 'ports'
+      url: 'https://ftpmirror.gnu.org/mpfr/mpfr-4.2.2.tar.xz'
+      checksum: 'blake2b:6bbf5658e70fbb673a3b65246a6bac708d1571aa6943c6742efd92f468ac71e6f0fe351b757f7133440ea312d9a5fc3549acd89d54f4d975c58bdc204d7b21ec'
+      format: 'tar.xz'
+      extract_path: 'mpfr-4.2.2'
+      version: '4.2.2'
+      tools_required:
+        - autoconf
+        - automake
+        - libtool
+        - pkgconf
+      regenerate:
+        - args: ['@SOURCE_ROOT@/support/autoconf/regenerate.sh']
+    pkgs_required:
+      - gmp
+    tools_required:
+      - gcc
+      - pkgconf
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--prefix=/usr'
+          - 'user_redefine_cc=yes'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']

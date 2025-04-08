@@ -29,3 +29,21 @@ tools:
       - args: ['make', '-j@PARALLELISM@', 'MAKEINFO=true']
     install:
       - args: ['make', '-j@PARALLELISM@', 'MAKEINFO=true', 'install']
+
+packages:
+  - name: binutils
+    architecture: '@OPTION:cpu@'
+    from_source: binutils
+    tools_required:
+      - gcc
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--prefix=/usr'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--with-build-sysroot=@SYSROOT_DIR@'
+          - '--with-sysroot=/'
+          - '--disable-nls'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
