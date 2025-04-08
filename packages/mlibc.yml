@@ -15,7 +15,7 @@ packages:
       subdir: ports
       git: 'https://github.com/managarm/mlibc.git'
       branch: master
-      commit: bc9133822b596e00be4019ef50eb33205cf149c5
+      commit: 9a42937f73aff0bbf7379ee70f4f99a5774694aa
       rolling_version: true
       version: '0.0pl@ROLLING_ID@'
       sources_required:

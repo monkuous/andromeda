@@ -1,4 +1,4 @@
-From fef2c3440c276598f19541767fb4f3ff2d2df6e9 Mon Sep 17 00:00:00 2001
+From bdc3eb35d03bd402ee82fac7bce889864b35c7b5 Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
@@ -74,8 +74,8 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/abi-bits/vt.h       |   1 +
  sysdeps/andromeda/include/abi-bits/wait.h     |   1 +
  sysdeps/andromeda/include/abi-bits/xattr.h    |   1 +
- sysdeps/andromeda/include/andromeda/cpu.h     |  34 +
- sysdeps/andromeda/include/andromeda/ioctl.h   |   9 +
+ sysdeps/andromeda/include/andromeda/cpu.h     |  35 +
+ sysdeps/andromeda/include/andromeda/ioctl.h   |  19 +
  sysdeps/andromeda/include/andromeda/memory.h  |  16 +
  sysdeps/andromeda/include/andromeda/mount.h   |  15 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
@@ -84,7 +84,7 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/mntent.h            |  43 +
  sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 80 files changed, 2234 insertions(+), 14 deletions(-)
+ 80 files changed, 2245 insertions(+), 14 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -158,7 +158,7 @@ Subject: [PATCH] Add Andromeda port
  create mode 100644 sysdeps/andromeda/meson.build
 
 diff --git a/meson.build b/meson.build
-index eae40c4f..4ca20afb 100644
+index a1e526bc..20ef22ad 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -17,6 +17,8 @@ libc_include_dirs = [
@@ -170,7 +170,7 @@ index eae40c4f..4ca20afb 100644
  rtld_sources = [ ]
  rtld_dso_sources = [ ]
  libc_sources = [ ]
-@@ -99,12 +101,10 @@ if not headers_only
+@@ -104,12 +106,10 @@ if not headers_only
  		endif
  
  		if c_compiler.get_id() == 'gcc' and fs.exists(ccdir / 'include-fixed')
@@ -185,7 +185,7 @@ index eae40c4f..4ca20afb 100644
  	endif
  
  	if not freestnd_cxx_hdrs_dep.found()
-@@ -155,8 +155,7 @@ if not headers_only
+@@ -160,8 +160,7 @@ if not headers_only
  			endif
  		endforeach
  
@@ -195,10 +195,10 @@ index eae40c4f..4ca20afb 100644
  	endif
  endif
  
-@@ -258,6 +257,10 @@ elif host_machine.system() == 'astral'
- 	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
- 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
- 	subdir('sysdeps/astral')
+@@ -272,6 +271,10 @@ elif host_machine.system() == 'nyaux'
+ 	rtld_include_dirs += include_directories('sysdeps/nyaux/include')
+ 	libc_include_dirs += include_directories('sysdeps/nyaux/include')
+ 	subdir('sysdeps/nyaux')
 +elif host_machine.system() == 'andromeda'
 +	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
 +	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
@@ -206,7 +206,7 @@ index eae40c4f..4ca20afb 100644
  else
  	error('No sysdeps defined for OS: ' + host_machine.system())
  endif
-@@ -321,6 +324,9 @@ libc_include_dirs += include_directories('.')
+@@ -357,6 +360,9 @@ libc_include_dirs += include_directories('.')
  
  #----------------------------------------------------------------------------------------
  
@@ -254,7 +254,7 @@ index 1c29fa0f..88600a8e 100644
  #endif
  
 diff --git a/options/elf/include/elf.h b/options/elf/include/elf.h
-index 24ff1377..78eb461d 100644
+index 9eabfc60..2ff10b35 100644
 --- a/options/elf/include/elf.h
 +++ b/options/elf/include/elf.h
 @@ -269,6 +269,7 @@ enum {
@@ -306,10 +306,10 @@ index d2cd348b..a049f8a7 100644
  .global setjmp
  .type setjmp, "function"
 diff --git a/options/posix/include/mlibc/posix-sysdeps.hpp b/options/posix/include/mlibc/posix-sysdeps.hpp
-index 7c526293..a3754973 100644
+index b23436b1..66cb6123 100644
 --- a/options/posix/include/mlibc/posix-sysdeps.hpp
 +++ b/options/posix/include/mlibc/posix-sysdeps.hpp
-@@ -71,7 +71,7 @@ int sys_close(int fd);
+@@ -72,7 +72,7 @@ int sys_close(int fd);
  [[gnu::weak]] int sys_readlink(const char *path, void *buffer, size_t max_size, ssize_t *length);
  [[gnu::weak]] int sys_readlinkat(int dirfd, const char *path, void *buffer, size_t max_size, ssize_t *length);
  [[gnu::weak]] int sys_rmdir(const char *path);
@@ -319,10 +319,10 @@ index 7c526293..a3754973 100644
  [[gnu::weak]] int sys_unlinkat(int fd, const char *path, int flags);
  [[gnu::weak]] int sys_openat(int dirfd, const char *path, int flags, mode_t mode, int *fd);
 diff --git a/options/rtld/generic/linker.cpp b/options/rtld/generic/linker.cpp
-index 848f7ded..cd64e9fd 100644
+index 33cd1b93..1a8a0c9f 100644
 --- a/options/rtld/generic/linker.cpp
 +++ b/options/rtld/generic/linker.cpp
-@@ -1928,6 +1928,9 @@ void Loader::_processRelocations(Relocation &rel) {
+@@ -1950,6 +1950,9 @@ void Loader::_processRelocations(Relocation &rel) {
  		__ensure(p);
  		rel.relocate(p->symbol()->st_value + rel.addend_rel() - TLS_DTV_OFFSET);
  	} break;
@@ -332,7 +332,7 @@ index 848f7ded..cd64e9fd 100644
  	case R_TLS_TPREL: {
  		uintptr_t off = rel.addend_rel();
  		ssize_t tls_offset = 0;
-@@ -1952,6 +1955,14 @@ void Loader::_processRelocations(Relocation &rel) {
+@@ -1974,6 +1977,14 @@ void Loader::_processRelocations(Relocation &rel) {
  			tls_offset = rel.object()->tlsOffset;
  		}
  
@@ -2633,10 +2633,10 @@ index 00000000..66412d70
 \ No newline at end of file
 diff --git a/sysdeps/andromeda/include/andromeda/cpu.h b/sysdeps/andromeda/include/andromeda/cpu.h
 new file mode 100644
-index 00000000..50b967ff
+index 00000000..8965d465
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/cpu.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +#ifndef _ANDROMEDA_CPU_H
 +#define _ANDROMEDA_CPU_H
 +
@@ -2669,14 +2669,15 @@ index 00000000..50b967ff
 +
 +/* Note that this also disables paging, so your addresses have to be physical ones */
 +#define IOCTL_SET_REGISTERS 0x20000
++#define IOCTL_REBOOT 0x20001
 +
 +#endif /* _ANDROMEDA_CPU_H */
 diff --git a/sysdeps/andromeda/include/andromeda/ioctl.h b/sysdeps/andromeda/include/andromeda/ioctl.h
 new file mode 100644
-index 00000000..5308bd64
+index 00000000..b63bc6c4
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/ioctl.h
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,19 @@
 +#pragma once
 +
 +#define TCGETS 0x5401
@@ -2686,6 +2687,16 @@ index 00000000..5308bd64
 +#define TCSBRK 0x5409
 +#define TCXONC 0x540a
 +#define TCFLSH 0x540b
++
++#define IOCTL_GET_MODIFIER_STATE 0x30000
++#define MODIFIER_CONTROL 1
++#define MODIFIER_LEFT_SHIFT 2
++#define MODIFIER_RIGHT_SHIFT 4
++#define MODIFIER_ALT 8
++#define MODIFIER_SCROLL_LOCK 16
++#define MODIFIER_NUM_LOCK 32
++#define MODIFIER_CAPS_LOCK 64
++#define MODIFIER_INSERT 128
 diff --git a/sysdeps/andromeda/include/andromeda/memory.h b/sysdeps/andromeda/include/andromeda/memory.h
 new file mode 100644
 index 00000000..caa8e35e
