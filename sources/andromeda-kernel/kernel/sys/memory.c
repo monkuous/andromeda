@@ -73,18 +73,16 @@ static int get_location(struct futex_loc *out, uintptr_t addr) {
     vm_region_t *region = vm_get_region(addr);
     if (unlikely(!region)) return EFAULT;
 
-    out->inode = region->src->inode;
-
-    if (out->inode) {
-        // caller is responsible for increasing the inode ref count if necessary
-        out->value = region->offset + (addr - region->head);
+    if (region->flags & MAP_PRIVATE) {
+        // MAP_PRIVATE mappings can get cow'd, but they can't be moved
+        // or shared, so just use the virtual address as its identifier
+        out->value = addr;
         goto exit;
     }
 
-    if (region->flags & MAP_PRIVATE) {
-        // anonymous MAP_PRIVATE mappings can get cow'd, but they can't be moved
-        // or shared, so just use the virtual address as its identifier
-        out->value = addr;
+    if (region->src) {
+        // caller is responsible for increasing the inode ref count if necessary
+        out->value = region->offset + (addr - region->head);
         goto exit;
     }
 
