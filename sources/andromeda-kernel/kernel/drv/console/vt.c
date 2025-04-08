@@ -10,7 +10,7 @@
 #include "util/print.h"
 #include <stdint.h>
 
-#if 0
+#if 1
 static void on_invalid() {
 }
 
@@ -194,6 +194,27 @@ static void save_state() {
 
 static void restore_state() {
     vt_state = saved_state;
+    if (vt_state.y >= base_height) vt_state.y = base_height - 1;
+}
+
+static void reverse_lf() {
+    if (vt_state.y + base_y == scroll_y0) {
+        ASSERT(vt_state.y + base_y == scroll_y0);
+
+        uint16_t val = cp_to_val(BLANK_CHAR);
+
+        for (unsigned y = scroll_y1 - 1; y > scroll_y0; y--) {
+            for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
+                screen_set_char(x, y, screen_get_char(x, y - 1));
+            }
+        }
+
+        for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
+            do_set_char(x, scroll_y0, val);
+        }
+    } else if (vt_state.y > 0) {
+        vt_state.y -= 1;
+    }
 }
 
 static void process_esc_init(uint32_t cp) {
@@ -205,6 +226,7 @@ static void process_esc_init(uint32_t cp) {
     case 'E': emit_lf(); break;
     case 'H': set_tab_stop(vt_state.x); break;
     case 'M':
+    reverse_lf();
         if (vt_state.y > 0) vt_state.y -= 1;
         break;
     case 'Z': inject_id(); break;
@@ -342,23 +364,18 @@ static unsigned clamp(unsigned val, unsigned min, unsigned max) {
     return val;
 }
 
-static void insert_chars(uint32_t cp, unsigned count) {
+static void insert_chars(unsigned count) {
     unsigned avail = SCREEN_WIDTH - vt_state.x;
     if (count > avail) count = avail;
 
-    uint16_t val = cp_to_val(cp);
+    uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
 
-    unsigned i;
-    unsigned x = vt_state.x;
+    unsigned x = SCREEN_WIDTH - 1;
 
-    for (i = 0; i < rem; i++, x++) {
-        screen_set_char(x + count, vt_state.y + base_y, screen_get_char(x, vt_state.y));
-        if (i < count) set_new_char(x, vt_state.y + base_y, val);
-    }
-
-    for (; i < count; i++, x++) {
-        set_new_char(x, vt_state.y + base_y, val);
+    for (unsigned i = rem; i > 0; i--, x--) {
+        if (i > count) screen_set_char(x, vt_state.y + base_y, screen_get_char(x, vt_state.y + base_y));
+        else do_set_char(x, vt_state.y + base_y, val);
     }
 }
 
@@ -435,31 +452,24 @@ static void erase_line(unsigned type) {
 
 static void insert_lines(unsigned count) {
     unsigned avail = base_height - vt_state.y;
-    if (avail > count) count = avail;
+    if (avail < count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
 
-    unsigned i;
-    unsigned y = vt_state.y + base_y;
+    unsigned y = base_y + base_height - 1;
 
-    for (i = 0; i < rem; i++, y++) {
+    for (unsigned i = rem; i > 0; i--, y--) {
         for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
-            screen_set_char(x, y + count, screen_get_char(x, y));
-            if (i < count) do_set_char(x, y, val);
-        }
-    }
-
-    for (; i < count; i++, y++) {
-        for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
-            do_set_char(x, y, val);
+            if (i > count) screen_set_char(x, y, screen_get_char(x, y - count));
+            else do_set_char(x, y, val);
         }
     }
 }
 
 static void delete_lines(unsigned count) {
     unsigned avail = base_height - vt_state.y;
-    if (avail > count) count = avail;
+    if (avail < count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
@@ -469,12 +479,11 @@ static void delete_lines(unsigned count) {
 
     for (i = 0; i < rem; i++, y++) {
         for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
-            if (i < count) screen_set_char(x, y, screen_get_char(x, y + count));
-            do_set_char(x, y + count, val);
+            screen_set_char(x, y, screen_get_char(x, y + count));
         }
     }
 
-    for (; i < count; i++, y++) {
+    for (; i < avail; i++, y++) {
         for (unsigned x = 0; x < SCREEN_WIDTH; x++) {
             do_set_char(x, y, val);
         }
@@ -483,7 +492,7 @@ static void delete_lines(unsigned count) {
 
 static void delete_chars(unsigned count) {
     unsigned avail = SCREEN_WIDTH - vt_state.x;
-    if (avail > count) count = avail;
+    if (avail < count) count = avail;
 
     uint16_t val = cp_to_val(BLANK_CHAR);
     unsigned rem = avail - count;
@@ -492,11 +501,10 @@ static void delete_chars(unsigned count) {
     unsigned x = vt_state.x;
 
     for (i = 0; i < rem; i++, x++) {
-        if (i < count) screen_set_char(x, vt_state.y + base_y, screen_get_char(x + count, vt_state.y + base_y));
-        do_set_char(x + count, vt_state.y + base_y, val);
+        screen_set_char(x, vt_state.y + base_y, screen_get_char(x + count, vt_state.y + base_y));
     }
 
-    for (; i < count; i++, x++) {
+    for (; i < avail; i++, x++) {
         do_set_char(x, vt_state.y + base_y, val);
     }
 }
@@ -732,7 +740,7 @@ static void process_esc_csi(uint32_t cp) {
     esc_state = ESC_NONE;
 
     switch (cp) {
-    case '@': return insert_chars(BLANK_CHAR, get_esc_param(0, 1));
+    case '@': return insert_chars(get_esc_param(0, 1));
     case 'A': return incr_coord(&vt_state.y, base_height, -(int)get_esc_param(0, 1));
     case 'e':
     case 'B': return incr_coord(&vt_state.y, base_height, get_esc_param(0, 1));
