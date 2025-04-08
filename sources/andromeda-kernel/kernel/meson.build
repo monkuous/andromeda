@@ -71,6 +71,7 @@ kernel_elf = executable(
         '-fno-stack-protector',
         '-mgeneral-regs-only',
         '-mregparm=3',
+        '-Wno-stringop-overflow', # this has a lot of false positives when using lto
     ],
     link_args: ['-nostdlib', '-static', '-T' + script.full_path()],
     link_depends: script,

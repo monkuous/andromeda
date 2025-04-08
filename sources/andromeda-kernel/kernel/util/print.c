@@ -137,7 +137,9 @@ void print_set_console(bool console) {
 
 static void term_sink(const void *buf, size_t size, void *) {
 #if ANDROMEDA_QEMU_DEBUGCON
-    asm("rep outsb" :: "d" (0xe9), "S" (buf), "c" (size));
+    const void *obuf = buf;
+    size_t osize = size;
+    asm volatile("rep outsb" : "+S" (obuf), "+c" (osize) :"d"(0xe9));
 #endif
 
     if (print_to_console) console_write(buf, size);
