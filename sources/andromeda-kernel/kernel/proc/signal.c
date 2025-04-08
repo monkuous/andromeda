@@ -1,5 +1,6 @@
 #include "signal.h"
 #include "compiler.h"
+#include "cpu/fpu.h"
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
 #include "mem/usermem.h"
@@ -189,13 +190,12 @@ retry:
         ctx.rest.context.uc_mcontext.gregs[REG_SS] = regs->ss;
         ctx.rest.context.uc_mcontext.fpregs = (void *)(ctx_addr + offsetof(sigctx_t, rest.fpu));
 
-        asm volatile("fsave %0" : "+m"(ctx.rest.fpu));
+        fpu_save_signal(&ctx.rest.fpu);
 
         memcpy(&ctx.rest.info, &sig->info, sizeof(sig->info));
 
         if (unlikely(user_memcpy((void *)ctx_addr, &ctx, sizeof(ctx)))) {
-            // fsave reset the registers to their initial values, restore them again
-            asm("frstor %0" ::"m"(ctx.rest.context.uc_mcontext.fpregs));
+            fpu_restore_signal(&ctx.rest.fpu);
             if (i == SIGSEGV || i == SIGBUS) force_default = true;
             goto retry;
         }
@@ -215,8 +215,6 @@ retry:
             action->sa_handler = nullptr;
             action->sa_flags &= ~SA_SIGINFO;
         }
-
-        asm("fwait");
     }
 
     target->signals[i] = nullptr;
@@ -318,7 +316,7 @@ int return_from_signal() {
     regs->ss = ctx.context.uc_mcontext.gregs[REG_SS];
     regs->vector = 0;
 
-    asm("frstor %0" ::"m"(ctx.fpu));
+    fpu_restore_signal(&ctx.fpu);
 
     if (ctx.on_sigstack) {
         current->sigstack.ss_flags &= ~SS_ONSTACK;

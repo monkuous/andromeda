@@ -1,4 +1,5 @@
 #include "sched.h"
+#include "cpu/fpu.h"
 #include "cpu/gdt.h"
 #include "drv/idle.h"
 #include "mem/pmap.h"
@@ -43,8 +44,8 @@ static void handle_switch(thread_t *prev) {
             switch_pmap(&current->vm->pmap);
         }
 
-        asm volatile("fsave %0" : "+m"(prev->fpu));
-        asm volatile("frstor %0" ::"m"(current->fpu));
+        fpu_save(&prev->fpu);
+        fpu_restore(&current->fpu);
     }
 }
 

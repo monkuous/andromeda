@@ -11,6 +11,7 @@ config = vcs_tag(
 
 kernel_elf = executable(
     'kernel.elf',
+    'cpu/fpu.c',
     'cpu/gdt.c',
     'cpu/idt.c',
     'cpu/idt.S',

@@ -1,4 +1,5 @@
 #include "compiler.h"
+#include "cpu/fpu.h"
 #include "cpu/gdt.h"
 #include "cpu/idt.h"
 #include "drv/biosdisk.h"
@@ -162,6 +163,7 @@ static void chroot_to_initrd() {
     bootmem_handover();
     init_console_early();
     printk("\nStarting Andromeda...\n\n");
+    init_fpu();
     init_proc();
     init_vfs();
     init_console();

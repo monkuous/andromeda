@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cpu/fpu.h"
 #include "cpu/idt.h"
 #include "mem/vmm.h"
 #include "proc/signal.h"
@@ -23,11 +24,11 @@ typedef enum {
 } wake_reason_t;
 
 typedef struct thread {
+    fpu_area_t fpu;
     list_node_t node;
     thread_state_t state;
     idt_frame_t regs;
     uintptr_t tdata;
-    unsigned char fpu[128];
     struct {
         thread_cont_t func;
         void *ctx;
