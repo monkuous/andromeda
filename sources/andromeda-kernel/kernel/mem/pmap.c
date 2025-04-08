@@ -121,7 +121,7 @@ static void sendsig(int signo, int error, uintptr_t addr) {
            current->regs.eip,
            current->regs.esp);
 
-    siginfo_t info = {.si_signo = signo, .si_errno = error, .si_addr = (void *)addr};
+    siginfo_t info = {.si_signo = signo, .si_errno = error, .si_addr = (void *)addr, .si_code = SI_KERNEL};
     send_signal(current->process, current, &info, true);
 }
 

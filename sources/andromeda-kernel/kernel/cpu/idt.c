@@ -113,7 +113,7 @@ static uint64_t create_irq_entry(uintptr_t thunk, uint8_t dpl) {
 static void signal_or_fatal(idt_frame_t *frame, int signal) {
     if (frame->eip >= KERN_VIRT_BASE) handle_fatal_exception(frame);
 
-    siginfo_t info = {.si_signo = signal};
+    siginfo_t info = {.si_signo = signal, .si_code = SI_KERNEL};
     send_signal(current->process, current, &info, true);
 }
 
