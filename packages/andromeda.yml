@@ -11,4 +11,5 @@ packages:
       - andromeda-util
       - bash
       - coreutils
+      - less
       - nano
