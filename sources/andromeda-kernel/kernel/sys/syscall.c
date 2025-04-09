@@ -60,7 +60,7 @@ static int64_t log_post_syscall(int64_t value, [[maybe_unused]] const char *name
     va_end(args);
 #endif
 
-    log_syscall_ret((int)value);
+    log_syscall_ret(value);
     return value;
 }
 

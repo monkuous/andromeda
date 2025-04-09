@@ -28,6 +28,7 @@ packages:
           - '--prefix=/usr'
           - '--with-curses'
           - '--without-bash-malloc'
+          - 'CFLAGS=-DHEREDOC_PIPEMAX=4096'
     build:
       - args: ['make', '-j@PARALLELISM@']
       - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
