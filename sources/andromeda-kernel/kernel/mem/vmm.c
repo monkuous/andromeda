@@ -734,6 +734,7 @@ int vm_map(uintptr_t *addr, size_t size, int flags, int prot, file_t *file, uint
 
     if (file) {
         if (unlikely(flags & MAP_ANON)) return EINVAL;
+        if (unlikely(!file->ops)) return EBADF;
         if (unlikely(!S_ISREG(file->inode->mode) && !file->ops->mmap)) return ENODEV;
     } else if (unlikely(!(flags & MAP_ANON))) {
         return EINVAL;
