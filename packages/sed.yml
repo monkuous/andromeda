@@ -1,0 +1,27 @@
+packages:
+  - name: sed
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: 'ports'
+      url: 'https://ftpmirror.gnu.org/sed/sed-4.9.tar.xz'
+      checksum: 'blake2b:6c7c7dc782b87c3bd0b5e826ba46c2f1dc7bd8c1159945fcf14b394711742964628774cf9f27d844b672721d7849e6c31992d82fafb9ed4118b7feb60406d1e1'
+      format: 'tar.xz'
+      extract_path: 'sed-4.9'
+      version: '4.9'
+      tools_required:
+        - autoconf
+        - automake
+        - libtool
+        - pkgconf
+      regenerate:
+        - args: ['@SOURCE_ROOT@/support/autoconf/regenerate.sh']
+    tools_required:
+      - gcc
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--prefix=/usr'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
