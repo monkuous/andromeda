@@ -28,15 +28,9 @@ static unsigned prev_x, prev_y;
 static bool cur_enabled, prev_enabled;
 static uint16_t cur_covered;
 
+static bool screen_enabled;
+
 void screen_init() {
-    // ensure video mode is 3 (80x25 color text)
-    regs_t regs = (regs_t){.eax = 3};
-    intcall(0x10, &regs);
-
-    // disable cursor
-    regs = (regs_t){.eax = 0x100, .ecx = 0x2f0f};
-    intcall(0x10, &regs);
-
     // map video memory
     size_t map_size = (SCREEN_WIDTH * SCREEN_HEIGHT * 2 + PAGE_MASK) & ~PAGE_MASK;
     uintptr_t vaddr = vmem_alloc(map_size);
@@ -45,6 +39,7 @@ void screen_init() {
 
     screen_reset();
     screen_set_cursor_enabled(false);
+    screen_enable(true);
 }
 
 static uint16_t vidmem_read(int x, int y) {
@@ -73,7 +68,7 @@ static void vidmem_write(int x, int y, uint16_t value) {
 }
 
 static void vidmem_flush() {
-    if (!video_memory) return;
+    if (!screen_enabled) return;
 
     for (int i = 0; i < queue_count; i++) {
         uint16_t val = vidmem_queue[i].value;
@@ -90,6 +85,32 @@ static void vidmem_flush() {
     queue_count = 0;
 }
 
+void screen_disable() {
+    screen_enabled = false;
+}
+
+void screen_enable(bool restore) {
+    if (screen_enabled) return;
+
+    if (restore) {
+        // ensure video mode is 3 (80x25 color text)
+        regs_t regs = (regs_t){.eax = 3};
+        intcall(0x10, &regs);
+
+        // disable cursor
+        regs = (regs_t){.eax = 0x100, .ecx = 0x2f0f};
+        intcall(0x10, &regs);
+
+        // synchronize video memory
+        for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
+            video_memory[i] = vidmem_buffer[i].value;
+        }
+    }
+
+    screen_enabled = true;
+    vidmem_flush();
+}
+
 void screen_reset() {
     cur_x = cur_y = 0;
     cur_enabled = true;
@@ -99,6 +120,8 @@ void screen_reset() {
             screen_set_char(x, y, 0x720);
         }
     }
+
+    vidmem_flush();
 }
 
 void screen_set_char(unsigned x, unsigned y, uint16_t value) {

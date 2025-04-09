@@ -1,5 +1,6 @@
 #include "system.h"
 #include "compiler.h"
+#include "drv/vbe.h"
 #include "fs/vfs.h"
 #include "info/acpi.h"
 #include "mem/bootmem.h"
@@ -65,8 +66,17 @@ static void populate_acpi() {
     vmfree(rsdp, length);
 }
 
+static void populate_video() {
+    if (console_fb) {
+        file_t *file = open_file("console-framebuffer");
+        write_or_die(file, console_fb, sizeof(*console_fb));
+        file_deref(file);
+    }
+}
+
 void populate_sysfs() {
     printk("kernel: populating /sys\n");
     populate_mmap();
     populate_acpi();
+    populate_video();
 }

@@ -6,6 +6,7 @@
 #include "drv/console.h"
 #include "drv/device.h"
 #include "drv/loopback.h"
+#include "drv/vbe.h"
 #include "fs/detect.h"
 #include "fs/ramfs.h"
 #include "fs/vfs.h"
@@ -61,6 +62,7 @@ static void init_vfs() {
     error = vfs_mount(nullptr, "dev", 3, ramfs_create, &ramfs_ctx);
     if (unlikely(error)) panic("failed to mount /dev (%d)", error);
 
+    mkdir_or_die("/dev/video");
     mkdir_or_die("/dev/volumes");
     mkchr_or_die("/dev/null", 0666, DEVICE_ID(DRIVER_SPECIAL, DRIVER_SPECIAL_NULL));
     mkchr_or_die("/dev/mem", 0600, DEVICE_ID(DRIVER_SPECIAL, DRIVER_SPECIAL_MEM));
@@ -168,6 +170,7 @@ static void chroot_to_initrd() {
     init_vfs();
     init_console();
     init_biosdisk(boot_drive, boot_lba);
+    init_vbe();
     mount_boot();
     mount_initrd();
     chroot_to_initrd();

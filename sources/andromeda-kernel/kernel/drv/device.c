@@ -5,6 +5,7 @@
 #include "drv/cpu.h"
 #include "drv/loopback.h"
 #include "drv/mem.h"
+#include "drv/vbe.h"
 #include "fs/pgcache.h"
 #include "fs/vfs.h"
 #include "mem/pmem.h"
@@ -99,6 +100,7 @@ int open_cdev(dev_t device, file_t *file, int flags) {
     switch (device >> 32) {
     case DRIVER_CONSOLE: return open_console(device, file, flags);
     case DRIVER_SPECIAL: return open_special(device, file, flags);
+    case DRIVER_VIDEO: return open_video(device, file, flags);
     default: return ENXIO;
     }
 }

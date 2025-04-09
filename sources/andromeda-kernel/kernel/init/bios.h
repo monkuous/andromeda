@@ -27,3 +27,7 @@ static inline uint16_t lin_to_seg(uint32_t phys, uint16_t *seg) {
     *seg = phys >> 4;
     return phys & 15;
 }
+
+static inline uint32_t seg_to_lin(uint16_t seg, uint16_t off) {
+    return ((uint32_t)seg << 4) + off;
+}

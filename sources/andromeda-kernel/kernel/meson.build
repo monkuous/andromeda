@@ -26,6 +26,7 @@ kernel_elf = executable(
     'drv/loopback.c',
     'drv/mem.c',
     'drv/partition.c',
+    'drv/vbe.c',
     'fs/detect.c',
     'fs/fat.c',
     'fs/fifo.c',

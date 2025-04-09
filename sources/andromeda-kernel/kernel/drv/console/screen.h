@@ -13,4 +13,7 @@ void screen_set_cursor_enabled(bool enabled);
 void screen_set_cursor_pos(unsigned x, unsigned y);
 void screen_flush();
 
+void screen_disable();
+void screen_enable(bool restore);
+
 uint8_t screen_map_unicode(uint32_t codepoint);

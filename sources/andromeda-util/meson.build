@@ -5,6 +5,6 @@ project(
     meson_version: '>=1.4.0',
 )
 
-foreach name : ['hexdump', 'kbmods', 'mount', 'umount', 'reboot']
+foreach name : ['hexdump', 'kbmods', 'mount', 'reboot', 'umount', 'vidmode']
     executable(name, name + '.c', install: true)
 endforeach

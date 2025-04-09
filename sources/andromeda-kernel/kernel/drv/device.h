@@ -11,6 +11,7 @@
 #define DRIVER_LOOPBACK 3
 #define DRIVER_CONSOLE 4
 #define DRIVER_SPECIAL 5
+#define DRIVER_VIDEO 6
 
 #define DRIVER_SPECIAL_NULL 0
 #define DRIVER_SPECIAL_MEM 1
@@ -39,3 +40,5 @@ int open_bdev(dev_t device, file_t *file, int flags);
 int open_cdev(dev_t device, file_t *file, int flags);
 
 void init_bdev_pgcache(bdev_t *dev);
+
+uint32_t next_reserved_minor();
