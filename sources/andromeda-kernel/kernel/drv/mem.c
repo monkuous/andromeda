@@ -106,7 +106,7 @@ static int dev_mem_ioctl(file_t *, unsigned long request, void *arg) {
             return fd;
         }
 
-        inode_t *inode = create_anonymous_inode(S_IFCHR, DEVICE_ID(DRIVER_RESERVED, 0));
+        inode_t *inode = create_anonymous_inode(S_IFCHR, DEVICE_ID(DRIVER_RESERVED, next_reserved_minor()));
         file_t *file;
         error = -open_inode(&file, nullptr, inode, O_PATH);
         if (unlikely(error)) {

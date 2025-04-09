@@ -123,3 +123,8 @@ void init_bdev_pgcache(bdev_t *dev) {
     dev->data.ops = &bdev_pgcache_ops;
     pgcache_resize(&dev->data, dev->blocks << dev->block_shift);
 }
+
+uint32_t next_reserved_minor() {
+    static uint32_t next;
+    return next++;
+}
