@@ -48,6 +48,7 @@ imports:
   - file: packages/gcc.yml
   - file: packages/gdb.yml
   - file: packages/gmp.yml
+  - file: packages/grep.yml
   - file: packages/libtool.yml
   - file: packages/meson.yml
   - file: packages/mlibc.yml
