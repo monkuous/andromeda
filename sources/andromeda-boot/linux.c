@@ -47,24 +47,20 @@ static uint32_t phys_alloc(void **virt_out, size_t pages, size_t align) {
             .addr = UINT32_MAX,
     };
 
-    // this returns an fd that can be used to free the memory,
-    // but we can just ignore that since any scenario in which
-    // we need to free memory is also one where the process exits,
-    // so the fd gets autoclosed and the memory gets autofreed
-    if (ioctl(mem_fd, IOCTL_PMALLOC, &request) < 0) {
+    int fd = ioctl(mem_fd, IOCTL_PMALLOC, &request);
+    if (fd < 0) {
         fprintf(stderr, "%s: failed to allocate physical memory: %m\n", progname);
         exit(1);
     }
 
-    if (virt_out) {
-        void *base = mmap(NULL, request.pages << 12, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, request.addr);
-        if (base == MAP_FAILED) {
-            fprintf(stderr, "%s: failed to map allocated memory: %m\n", progname);
-            exit(1);
-        }
-        *virt_out = base;
+    void *base = mmap(NULL, request.pages << 12, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (base == MAP_FAILED) {
+        fprintf(stderr, "%s: failed to map allocated memory: %m\n", progname);
+        exit(1);
     }
+    *virt_out = base;
 
+    close(fd);
     return request.addr;
 }
 
