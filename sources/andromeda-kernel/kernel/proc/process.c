@@ -452,6 +452,8 @@ static void pwait_cont(void *ptr) {
             ctx->cont(-ECHILD, nullptr, ctx->ctx);
         }
     } else {
+        // when interrupted, the ctx hasn't been removed from the wait list yet
+        list_remove(&current->process->waiting, &ctx->node);
         ctx->cont(-EINTR, nullptr, ctx->ctx);
     }
 
@@ -543,6 +545,14 @@ static bool trigger_wait(process_t *proc) {
     return consumed;
 }
 
+static void do_wait_trigger(process_t *proc) {
+    send_signal(proc->parent, nullptr, &proc->wa_info, false);
+
+    if ((proc->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDWAIT) || trigger_wait(proc)) {
+        clean_zombie(proc);
+    }
+}
+
 static void make_zombie(process_t *proc) {
     ASSERT(proc->wa_info.si_signo == SIGCHLD);
 
@@ -564,6 +574,11 @@ static void make_zombie(process_t *proc) {
             } else if (--cur->group->orphan_inhibitors == 0) {
                 handle_group_orphaned(cur->group);
             }
+        }
+
+        if (cur->has_wait) {
+            list_insert_tail(&init_process.wait_avail, &cur->wa_node);
+            do_wait_trigger(cur);
         }
 
         cur = next;
@@ -588,11 +603,7 @@ static void make_zombie(process_t *proc) {
         console_disconnect_from_session(true);
     }
 
-    send_signal(proc->parent, nullptr, &proc->wa_info, false);
-
-    if ((proc->parent->signal_handlers[SIGCHLD].sa_flags & SA_NOCLDWAIT) || trigger_wait(proc)) {
-        clean_zombie(proc);
-    }
+    do_wait_trigger(proc);
 }
 
 void remove_thread_from_process(thread_t *thread) {
