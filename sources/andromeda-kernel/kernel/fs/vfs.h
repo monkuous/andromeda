@@ -208,7 +208,7 @@ int access_inode(inode_t *inode, int amode, bool real);
 int access_file(file_t *file, int amode);
 
 inode_t *create_anonymous_inode(mode_t mode, dev_t device);
-int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags);
+int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags, const file_ops_t *ops);
 
 mode_t vfs_umask(mode_t cmask);
 int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int flags, mode_t mode);

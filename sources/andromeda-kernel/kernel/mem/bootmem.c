@@ -254,6 +254,8 @@ void bootmem_handover() {
 }
 
 bool bootmem_iter(bool (*func)(uint64_t head, uint64_t tail, memory_type_t type, void *ctx), void *ctx, bool reverse) {
+    ASSERT(mmap_frozen);
+
     if (!reverse) {
         for (size_t i = 0; i < mmap_count; i++) {
             mem_region_t *region = &memory_map[i];
@@ -269,4 +271,57 @@ bool bootmem_iter(bool (*func)(uint64_t head, uint64_t tail, memory_type_t type,
     }
 
     return true;
+}
+
+void bootmem_iter_nonusable(
+        uint64_t head,
+        uint64_t tail,
+        bool (*cb)(uint64_t head, uint64_t tail, void *ctx),
+        void *ctx
+) {
+    ASSERT(mmap_frozen);
+
+    for (size_t i = 0; i < mmap_count; i++) {
+        mem_region_t *region = &memory_map[i];
+        if (tail < region->head) break;
+        if (region->type != MEM_USABLE) continue;
+        if (region->tail < head) continue;
+
+        if (head < region->head && !cb(head, region->head - 1, ctx)) {
+            return;
+        }
+
+        head = region->tail + 1;
+        if (head < region->tail) return;
+        if (head > tail) return;
+    }
+
+    cb(head, tail, ctx);
+}
+
+bool get_memory_region(uint64_t phys, uint64_t *head_out, uint64_t *tail_out, memory_type_t *type_out) {
+    ASSERT(mmap_frozen);
+
+    size_t start = 0;
+    size_t count = mmap_count;
+
+    while (count) {
+        size_t idx = count / 2;
+        mem_region_t *region = &memory_map[start + idx];
+
+        if (region->head <= phys && phys <= region->tail) {
+            *head_out = region->head;
+            *tail_out = region->tail;
+            *type_out = region->type;
+            return true;
+        }
+
+        if (phys > region->head) {
+            start += idx + 1;
+        }
+
+        count -= idx + 1;
+    }
+
+    return false;
 }

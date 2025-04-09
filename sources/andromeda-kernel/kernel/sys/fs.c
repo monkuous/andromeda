@@ -602,7 +602,7 @@ int64_t sys_PIPE(int flags) {
     inode_t *inode = create_anonymous_inode(S_IFIFO | 0600, 0);
     file_t *rfile, *wfile;
 
-    int error = -open_inode(&rfile, nullptr, inode, flags | O_RDONLY);
+    int error = -open_inode(&rfile, nullptr, inode, flags | O_RDONLY, nullptr);
     if (unlikely(error)) {
         inode_deref(inode);
         fd_free(wfd);
@@ -610,7 +610,7 @@ int64_t sys_PIPE(int flags) {
         return error;
     }
 
-    error = -open_inode(&wfile, nullptr, inode, flags | O_WRONLY);
+    error = -open_inode(&wfile, nullptr, inode, flags | O_WRONLY, nullptr);
     inode_deref(inode);
     if (unlikely(error)) {
         file_deref(rfile);

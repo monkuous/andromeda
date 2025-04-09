@@ -377,7 +377,7 @@ int access_file(file_t *file, int amode) {
     return (avail & amode) == amode ? 0 : EACCES;
 }
 
-int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
+int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags, const file_ops_t *ops) {
     file_t *file = vmalloc(sizeof(*file));
     memset(file, 0, sizeof(*file));
     file->references = 1;
@@ -385,7 +385,9 @@ int open_inode(file_t **out, dentry_t *path, inode_t *inode, int flags) {
     file->inode = inode;
     file->flags = flags & (O_ACCMODE | FL_STATUS_FLAGS);
 
-    if (!(flags & O_PATH)) {
+    if (ops) {
+        file->ops = ops;
+    } else if (!(flags & O_PATH)) {
         int error = 0;
 
         switch (inode->mode & S_IFMT) {
@@ -755,7 +757,7 @@ int vfs_open(file_t **out, file_t *rel, const void *path, size_t length, int fla
     }
 
     ASSERT(entry->inode);
-    error = open_inode(out, entry, entry->inode, flags);
+    error = open_inode(out, entry, entry->inode, flags, nullptr);
 exit:
     dentry_deref(entry);
     return error;

@@ -2,6 +2,7 @@
 #include "compiler.h"
 #include "drv/device.h"
 #include "fs/vfs.h"
+#include "mem/bootmem.h"
 #include "mem/pmap.h"
 #include "mem/pmem.h"
 #include "mem/usermem.h"
@@ -10,6 +11,7 @@
 #include "sys/syscall.h"
 #include <andromeda/memory.h>
 #include <errno.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -60,14 +62,32 @@ static int dev_mem_write(file_t *self, void *buffer, size_t *size, uint64_t offs
     return dev_mem_op(self, buffer, size, offset, update_pos, true);
 }
 
+struct dev_mem_mmap_ctx {
+    uintptr_t vhead;
+    uint64_t phead;
+    uint32_t flags;
+};
+
+static bool dev_mem_mmap_cb(uint64_t head, uint64_t tail, void *ptr) {
+    if (head > UINT32_MAX) return false;
+
+    uint32_t avail = UINT32_MAX - head;
+    uint32_t req = tail - head;
+    uint32_t cur = req < avail ? req : avail;
+
+    struct dev_mem_mmap_ctx *ctx = ptr;
+    pmap_map(ctx->vhead + (head - ctx->phead), head, cur + 1, ctx->flags);
+
+    return cur == req;
+}
+
 static void dev_mem_mmap(file_t *, uintptr_t head, uintptr_t tail, uint64_t offset, int, int prot) {
-    if (offset > UINT32_MAX) return;
-
-    uint32_t avail = UINT32_MAX - offset;
-    uint32_t req = tail - head + 1;
-    if (req > avail) req = avail;
-
-    pmap_map(head, offset, req, prot & PROT_WRITE ? PMAP_WRITABLE : 0);
+    struct dev_mem_mmap_ctx ctx = {
+            .vhead = head,
+            .phead = offset,
+            .flags = prot & PROT_WRITE ? PMAP_WRITABLE : 0,
+    };
+    bootmem_iter_nonusable(ctx.phead, (tail - head) + offset, dev_mem_mmap_cb, &ctx);
 }
 
 typedef struct {
@@ -81,7 +101,22 @@ static void pmalloc_file_free(file_t *ptr) {
     vmfree(data, sizeof(*data));
 }
 
-static const file_ops_t pmalloc_file_ops = {.free = pmalloc_file_free};
+static void pmalloc_file_mmap(file_t *self, uintptr_t head, uintptr_t tail, uint64_t offset, int, int prot) {
+    pmalloc_data_t *data = self->priv;
+    uint32_t max = (data->count << PAGE_SHIFT) - 1;
+    if (offset > max) return;
+
+    uint32_t avail = max - offset;
+    uint32_t req = tail - head;
+    if (req > avail) req = avail;
+
+    pmap_map(head, page_to_phys(data->page) + offset, req + 1, prot & PROT_WRITE ? PMAP_WRITABLE : 0);
+}
+
+static const file_ops_t pmalloc_file_ops = {
+        .free = pmalloc_file_free,
+        .mmap = pmalloc_file_mmap,
+};
 
 static int dev_mem_ioctl(file_t *, unsigned long request, void *arg) {
     switch (request) {
@@ -108,7 +143,7 @@ static int dev_mem_ioctl(file_t *, unsigned long request, void *arg) {
 
         inode_t *inode = create_anonymous_inode(S_IFCHR, DEVICE_ID(DRIVER_RESERVED, next_reserved_minor()));
         file_t *file;
-        error = -open_inode(&file, nullptr, inode, O_PATH);
+        error = -open_inode(&file, nullptr, inode, O_RDWR, &pmalloc_file_ops);
         if (unlikely(error)) {
             fd_free(fd);
             pmem_free_multiple(page, data.pages);
@@ -118,7 +153,6 @@ static int dev_mem_ioctl(file_t *, unsigned long request, void *arg) {
         pmalloc_data_t *fdat = vmalloc(sizeof(*fdat));
         fdat->page = page;
         fdat->count = data.pages;
-        file->ops = &pmalloc_file_ops;
         file->priv = fdat;
 
         error = -user_memcpy(arg, &data, sizeof(data));
