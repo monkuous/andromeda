@@ -36,6 +36,23 @@ static size_t fifo_free(fifo_state_t *state) {
     return (PIPE_BUF - state->write_index) + state->read_index;
 }
 
+struct read_ctx {
+    list_node_t node;
+    thread_t *thread;
+    inode_t *inode;
+    void *buffer;
+    size_t size;
+};
+
+struct write_ctx {
+    list_node_t node;
+    thread_t *thread;
+    inode_t *inode;
+    void *buffer;
+    size_t size;
+    size_t done;
+};
+
 static int read_now(inode_t *inode, void *buffer, size_t *size) {
     void *src = inode->fifo.buffer;
     size_t ri = inode->fifo.read_index;
@@ -68,6 +85,11 @@ static int read_now(inode_t *inode, void *buffer, size_t *size) {
 exit:
     inode->fifo.read_index = ri;
     inode->fifo.has_data = ri != inode->fifo.write_index;
+
+    list_foreach(inode->fifo.write_waiting, struct read_ctx, node, cur) {
+        sched_unblock(cur->thread);
+    }
+
     return 0;
 }
 
@@ -103,25 +125,13 @@ static int write_now(inode_t *inode, void *buffer, size_t *size) {
 exit:
     inode->fifo.write_index = wi;
     inode->fifo.has_data = true;
+
+    list_foreach(inode->fifo.read_waiting, struct read_ctx, node, cur) {
+        sched_unblock(cur->thread);
+    }
+
     return 0;
 }
-
-struct read_ctx {
-    list_node_t node;
-    thread_t *thread;
-    inode_t *inode;
-    void *buffer;
-    size_t size;
-};
-
-struct write_ctx {
-    list_node_t node;
-    thread_t *thread;
-    inode_t *inode;
-    void *buffer;
-    size_t size;
-    size_t done;
-};
 
 static void send_sigpipe() {
     siginfo_t info = {
