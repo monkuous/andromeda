@@ -56,4 +56,5 @@ imports:
   - file: packages/nano.yml
   - file: packages/ncurses.yml
   - file: packages/pkgconf.yml
+  - file: packages/tar.yml
   - file: packages/tzdata.yml

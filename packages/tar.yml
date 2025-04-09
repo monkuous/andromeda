@@ -1,0 +1,27 @@
+packages:
+  - name: tar
+    architecture: '@OPTION:cpu@'
+    source:
+      subdir: 'ports'
+      url: 'https://ftpmirror.gnu.org/tar/tar-1.35.tar.xz'
+      checksum: 'blake2b:e1a200d21f433cd7d917dd979db16919a9167056ae62cf7d038a6118e56b2fe419cd4a396eee66f1f4dc13a8dc380e23f6ffd7ee0ca84e5dd9ad9411f60e002c'
+      format: 'tar.xz'
+      extract_path: 'tar-1.35'
+      version: '1.35'
+      tools_required:
+        - autoconf
+        - automake
+        - libtool
+        - pkgconf
+      regenerate:
+        - args: ['@SOURCE_ROOT@/support/autoconf/regenerate.sh']
+    tools_required:
+      - gcc
+    configure:
+      - args:
+          - '@THIS_SOURCE_DIR@/configure'
+          - '--host=@OPTION:cpu@-@OPTION:triple@'
+          - '--prefix=/usr'
+    build:
+      - args: ['make', '-j@PARALLELISM@']
+      - args: ['make', '-j@PARALLELISM@', 'DESTDIR=@THIS_COLLECT_DIR@', 'install']
