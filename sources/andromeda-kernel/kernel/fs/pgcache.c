@@ -30,6 +30,7 @@ static void lru_add(page_t *page) {
 }
 
 static void lru_del(page_t *page) {
+    ASSERT(page->is_cache);
     list_remove(&pgcache_lru, &page->cache.lru_node);
 }
 
@@ -90,7 +91,7 @@ int pgcache_get_page(pgcache_t *cache, page_t **out, uint64_t index, bool create
     page_t *page = *ptr;
 
     if (page) {
-        if (evictable) lru_refresh(page);
+        if (page->is_cache) lru_refresh(page);
     } else if (create) {
         page = pmem_alloc(evictable);
         page->cache.cache = cache;
@@ -223,6 +224,7 @@ page_t *pgcache_evict() {
 }
 
 void pgcache_evict_specific(page_t *page) {
+    ASSERT(page->is_cache);
     handle_eviction(page->cache.cache, page);
     lru_del(page);
 
@@ -230,6 +232,23 @@ void pgcache_evict_specific(page_t *page) {
     ASSERT(deleted == page);
 
     page->is_cache = false;
+}
+
+static bool disable_evict(page_t *page) {
+    if (page->is_cache) {
+        page->is_cache = false;
+        lru_del(page);
+        return true;
+    }
+
+    return false;
+}
+
+static void enable_evict(page_t *page, bool disable_status) {
+    if (disable_status) {
+        page->is_cache = true;
+        lru_add(page);
+    }
 }
 
 int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {
@@ -247,11 +266,13 @@ int pgcache_read(pgcache_t *cache, void *buffer, size_t size, uint64_t offset) {
         int error = pgcache_get_page(cache, &page, index, false);
         if (unlikely(error)) return error;
 
+        bool disable_status = disable_evict(page);
         if (page) {
             error = user_memcpy(buffer, pmap_tmpmap(page_to_phys(page)) + pgoff, cur);
         } else {
             error = user_memset(buffer, 0, cur);
         }
+        enable_evict(page, disable_status);
 
         if (unlikely(error)) return error;
 
@@ -281,7 +302,9 @@ int pgcache_write(pgcache_t *cache, const void *buffer, size_t size, uint64_t of
         int error = pgcache_get_page(cache, &page, index, true);
         if (unlikely(error)) return error;
 
+        bool disable_status = disable_evict(page);
         error = user_memcpy(pmap_tmpmap(page_to_phys(page)) + pgoff, buffer, cur);
+        enable_evict(page, disable_status);
         if (unlikely(error)) return error;
 
         buffer += cur;
