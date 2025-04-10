@@ -1,7 +1,8 @@
 #include "linux.h"
+#include "libboot.h"
+#include "utils.h"
 #include <andromeda/cpu.h>
 #include <andromeda/memory.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,71 +15,35 @@
 
 #define PROTOCOL_MIN PROTOCOL_2_05
 
-static int mem_fd;
-static char *progname;
+const char *progname;
 
 typedef struct {
     uint64_t gdt[4];
     char cmdline[];
 } start_data_t;
 
-static FILE *do_open(const char *path) {
-    FILE *file = fopen(path, "r");
-    if (!file) {
-        fprintf(stderr, "%s: failed to open %s: %m\n", progname, path);
-        exit(1);
-    }
-    return file;
-}
+typedef struct {
+    const char *path;
+    const void *ptr;
+    size_t size;
+} initrd_t;
 
-static FILE *maybe_open(const char *path) {
-    FILE *file = fopen(path, "r");
-    if (!file && errno != ENOENT) {
-        fprintf(stderr, "%s: failed to open %s: %m\n", progname, path);
-        exit(1);
-    }
-    return file;
-}
+static initrd_t *initrds;
+static size_t num_initrd;
+static size_t tot_initrd_size;
 
-static uint32_t phys_alloc(void **virt_out, size_t pages, size_t align) {
-    andromeda_pmalloc_t request = {
-            .pages = pages,
-            .align = align,
-            .addr = UINT32_MAX,
-    };
+static void fill_setup_info(const linux_image_t *, setup_info_t *info, paddr_t kernel_phys, paddr_t start_data_phys) {
+    paddr_t initrd_phys;
 
-    int fd = ioctl(mem_fd, IOCTL_PMALLOC, &request);
-    if (fd < 0) {
-        fprintf(stderr, "%s: failed to allocate physical memory: %m\n", progname);
-        exit(1);
-    }
+    if (tot_initrd_size) {
+        initrd_phys = UINT32_MAX;
+        void *virt = libboot_mem_alloc_pages(&initrd_phys, tot_initrd_size, 1, 0);
 
-    void *base = mmap(NULL, request.pages << 12, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (base == MAP_FAILED) {
-        fprintf(stderr, "%s: failed to map allocated memory: %m\n", progname);
-        exit(1);
-    }
-    *virt_out = base;
-
-    close(fd);
-    return request.addr;
-}
-
-static void fill_setup_info(
-        const linux_image_t *,
-        setup_info_t *info,
-        uint32_t kernel_phys,
-        uint32_t start_data_phys,
-        const void *initrd,
-        size_t initrd_size
-) {
-    uint32_t initrd_phys;
-
-    if (initrd_size) {
-        void *virt;
-        initrd_phys = phys_alloc(&virt, (initrd_size + 0xfff) >> 12, 0x1000);
-        printf("loading initrd\n");
-        memcpy(virt, initrd, initrd_size);
+        for (size_t i = 0; i < num_initrd; i++) {
+            printf("loading initrd %s\n", initrds[i].path);
+            memcpy(virt, initrds[i].ptr, initrds[i].size);
+            virt += initrds[i].size;
+        }
     } else {
         initrd_phys = 0;
     }
@@ -88,65 +53,51 @@ static void fill_setup_info(
     info->loadflags &= ~(LINUX_LOADFLAGS_CAN_USE_HEAP | LINUX_LOADFLAGS_KEEP_SEGMENTS | LINUX_LOADFLAGS_QUIET);
     info->code32_start = kernel_phys;
     info->ramdisk_image = initrd_phys;
-    info->ramdisk_size = initrd_size;
+    info->ramdisk_size = tot_initrd_size;
     info->cmd_line_ptr = start_data_phys + offsetof(start_data_t, cmdline);
     info->setup_data = 0;
 }
 
 static void fill_e820(boot_params_t *params) {
-    FILE *file = do_open("/sys/memory-map");
+    size_t size;
+    const libboot_mem_region_t *mmap = libboot_mem_get_raw_map(&size);
 
-    while (params->e820_entries < sizeof(params->e820_table) / sizeof(*params->e820_table)) {
-        uint64_t head, tail;
-        char type[32];
-        if (fscanf(file, "%llx-%llx %s", &head, &tail, type) < 3) break;
+    size_t i;
 
-        if (head < 0x1000) head = 0x1000;
-        if (head > tail) continue;
+    for (i = 0; i < size && i < sizeof(params->e820_table) / sizeof(*params->e820_table); i++) {
+        params->e820_table[i].addr = mmap[i].head;
+        params->e820_table[i].size = mmap[i].tail - mmap[i].head + 1;
 
-        boot_e820_entry_t *entry = &params->e820_table[params->e820_entries++];
-
-        entry->addr = head;
-        entry->size = tail - head + 1;
-
-        if (!strcmp(type, "usable")) entry->type = 1;
-        else if (!strcmp(type, "acpi-reclaimable")) entry->type = 3;
-        else if (!strcmp(type, "acpi-nvs")) entry->type = 4;
-        else entry->type = 2; // assume all unrecognized types are reserved
-
-        printf("got e820: %#llx-%#llx %u\n", entry->addr, entry->addr + entry->size, entry->type);
+        switch (mmap[i].type) {
+        case LIBBOOT_MEMORY_USABLE: params->e820_table[i].type = 1; break;
+        case LIBBOOT_MEMORY_ACPI_RECLAIMABLE: params->e820_table[i].type = 3; break;
+        case LIBBOOT_MEMORY_ACPI_NVS: params->e820_table[i].type = 4; break;
+        default: params->e820_table[i].type = 2; break; // unrecognized type, assume reserevd
+        }
     }
 
-    fclose(file);
+    params->e820_entries = i;
 }
 
 static void fill_acpi(boot_params_t *params) {
-    FILE *file = maybe_open("/sys/acpi-rsdp-addr");
-    if (!file) return;
-
-    uint64_t addr;
-    if (fscanf(file, "%llx", &addr)) {
+    paddr_t addr;
+    if (libboot_acpi_get_rsdp_addr(&addr)) {
         params->acpi_rsdp_addr = addr;
-        printf("got rsdp: %#llx\n", addr);
     }
-
-    fclose(file);
 }
 
 static void fill_boot_params(
         const linux_image_t *image,
         boot_params_t *params,
-        uint32_t kernel_phys,
-        uint32_t start_data_phys,
-        const void *initrd,
-        size_t initrd_size
+        paddr_t kernel_phys,
+        paddr_t start_data_phys
 ) {
     uint32_t setup_end = 0x202 + image->info.jump[1];
 
     memset(params, 0, sizeof(*params));
     memcpy(&params->setup_info, &image->info, setup_end - offsetof(linux_image_t, info));
 
-    fill_setup_info(image, &params->setup_info, kernel_phys, start_data_phys, initrd, initrd_size);
+    fill_setup_info(image, &params->setup_info, kernel_phys, start_data_phys);
     fill_e820(params);
     fill_acpi(params);
 
@@ -159,7 +110,7 @@ static void fill_boot_params(
     params->screen_info.orig_video_isVGA = 0x22;
 }
 
-static void load_kernel(const linux_image_t *image, uint32_t start_data_phys, const void *initrd, size_t initrd_size) {
+static void load_kernel(const linux_image_t *image, uint32_t start_data_phys) {
     unsigned protocol = image->info.version;
     printf("protocol: %u.%.2u\n", protocol >> 8, protocol & 0xff);
 
@@ -173,26 +124,18 @@ static void load_kernel(const linux_image_t *image, uint32_t start_data_phys, co
     printf("syssize: 0x%x\n", image->info.syssize << 4);
     printf("init_size: 0x%x\n", image->info.init_size);
 
-    void *kernel;
-    uint32_t kernel_phys = phys_alloc(&kernel, (image->info.init_size + 0xfff) >> 12, image->info.kernel_alignment);
+    paddr_t kernel_phys = UINT32_MAX, params_phys = UINT32_MAX;
+    void *kernel = libboot_mem_alloc_pages(&kernel_phys, image->info.init_size, image->info.kernel_alignment, 0);
+    void *params = libboot_mem_alloc_pages(&params_phys, sizeof(boot_params_t), 0x1000, 0);
 
-    void *params;
-    uint32_t params_phys = phys_alloc(&params, 1, 0x1000);
+    printf("allocated memory for kernel at 0x%llx (mapped to %p)\n", kernel_phys, kernel);
+    printf("zero page at 0x%llx (%p)\n", params_phys, params);
 
-    printf("allocated memory for kernel at 0x%x (mapped to %p)\n", kernel_phys, kernel);
-    printf("zero page at 0x%x (%p)\n", params_phys, params);
-
-    fill_boot_params(image, params, kernel_phys, start_data_phys, initrd, initrd_size);
+    fill_boot_params(image, params, kernel_phys, start_data_phys);
 
     printf("loading kernel image\n");
     memcpy(kernel, (const void *)image + kernel_start, image->info.syssize << 4);
     printf("starting kernel\n");
-
-    int cpu_fd = open("/dev/cpu", O_WRONLY);
-    if (cpu_fd < 0) {
-        fprintf(stderr, "%s: failed to open /dev/cpu: %m\n", progname);
-        exit(1);
-    }
 
     andromeda_cpu_regs_t regs = {
             .esi = params_phys,
@@ -210,61 +153,47 @@ static void load_kernel(const linux_image_t *image, uint32_t start_data_phys, co
                     },
     };
 
-    ioctl(cpu_fd, IOCTL_SET_REGISTERS, &regs);
+    libboot_handover(&regs);
     fprintf(stderr, "%s: failed to start kernel: %m\n", progname);
     exit(1);
 }
 
-static const void *mmap_file(const char *path, size_t *size_out) {
-    if (!path) {
-        if (size_out) *size_out = 0;
-        return nullptr;
-    }
-
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        fprintf(stderr, "%s: %s: open failed: %m\n", progname, path);
-        exit(1);
-    }
-
-    struct stat stat;
-    if (fstat(fd, &stat)) {
-        fprintf(stderr, "%s: %s: stat failed: %m\n", progname, path);
-        exit(1);
-    }
-
-    void *ptr = mmap(nullptr, (stat.st_size + 0xfff) & ~0xfff, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (ptr == MAP_FAILED) {
-        fprintf(stderr, "%s: %s: mmap failed: %m\n", progname, path);
-        exit(1);
-    }
-
-    if (size_out) *size_out = stat.st_size;
-    return ptr;
+static void add_initrd(const char *path) {
+    size_t idx = num_initrd++;
+    initrds = realloc(initrds, num_initrd * sizeof(*initrds));
+    initrds[idx].path = path;
+    initrds[idx].ptr = mmap_file(path, &initrds[idx].size);
+    tot_initrd_size += initrds[idx].size;
 }
 
 int main(int argc, char *argv[]) {
     progname = argv[0];
 
-    const char *initrd_path = nullptr;
     int c;
-
-    while ((c = getopt(argc, argv, "+i:")) != -1) {
-        if (c == '?' || c == ':') return 2;
-        initrd_path = optarg;
+    while ((c = getopt(argc, argv, "hi:")) != -1) {
+        switch (c) {
+        case '?': return 2;
+        case 'h':
+            printf("usage: %s [OPTION...] KERNEL [CMDLINE]\n"
+                   "\n"
+                   "options:\n"
+                   "  -h        show this help message"
+                   "  -i FILE   load FILE as initrd (can be specified multiple times)\n",
+                   argv[0]);
+            return 0;
+        case 'i': add_initrd(optarg); break;
+        }
     }
 
     if (optind >= argc) {
-        fprintf(stderr, "usage: %s [-i INITRD] KERNEL [CMDLINE]\n", argv[0]);
+        fprintf(stderr, "usage: %s [OPTION...] KERNEL [CMDLINE]\n", argv[0]);
         return 2;
     }
 
     const char *kernel_path = argv[optind++];
     const char *cmdline = optind < argc ? argv[optind++] : "";
 
-    size_t initrd_size;
     const linux_image_t *image = mmap_file(kernel_path, nullptr);
-    const void *initrd = mmap_file(initrd_path, &initrd_size);
 
     const setup_info_t *info = &image->info;
     if (info->header != LINUX_MAGIC || info->version < PROTOCOL_MIN) {
@@ -282,22 +211,21 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    mem_fd = open("/dev/mem", O_RDWR);
-    if (mem_fd < 0) {
-        fprintf(stderr, "%s: failed to open /dev/mem: %m", argv[0]);
+    if (!libboot_mem_init(0)) {
+        fprintf(stderr, "%s: failed to initialize memory: %m", argv[0]);
         return 1;
     }
 
-    void *virt;
-    uint32_t start_data_phys = phys_alloc(
-            &virt,
-            (offsetof(start_data_t, cmdline) + strlen(cmdline) + 0x1000) >> 12,
-            0x1000
+    uint64_t start_data_phys = UINT32_MAX;
+    start_data_t *start_data = libboot_mem_alloc_pages(
+            &start_data_phys,
+            offsetof(start_data_t, cmdline) + strlen(cmdline) + 1,
+            alignof(start_data_t),
+            0
     );
-    start_data_t *start_data = virt;
     start_data->gdt[2] = 0xcf9b000000ffff;
     start_data->gdt[3] = 0xcf93000000ffff;
     strcpy(start_data->cmdline, cmdline);
 
-    load_kernel(image, start_data_phys, initrd, initrd_size);
+    load_kernel(image, start_data_phys);
 }

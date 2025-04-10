@@ -5,4 +5,5 @@ project(
     meson_version: '>=1.4.0',
 )
 
-executable('boot-linux', 'linux.c', install: true)
+libboot = shared_library('boot', 'libboot.c', install: true)
+executable('boot-linux', 'linux.c', install: true, link_with: libboot)
