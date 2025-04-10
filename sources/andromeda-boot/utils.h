@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 extern const char *progname;
 
@@ -58,7 +59,9 @@ static inline const void *mmap_file(const char *path, size_t *size_out) {
         exit(1);
     }
 
-    return mmap_fd(fd, path, size_out);
+    const void *ptr = mmap_fd(fd, path, size_out);
+    close(fd);
+    return ptr;
 }
 
 static inline void *alloc_pages(paddr_t *phys, size_t size, size_t align, int type) {
