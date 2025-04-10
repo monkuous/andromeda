@@ -1,7 +1,11 @@
 #include "libboot.h"
+#include "edid.h"
+#include "utils.h"
 #include <andromeda/cpu.h>
 #include <andromeda/memory.h>
+#include <andromeda/video.h>
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -238,21 +242,16 @@ bool libboot_acpi_get_rsdp(void **ptr_out, size_t *size_out) {
     size = stat.st_size;
     void *buf = malloc(size);
 
-    size_t off = 0;
-    while (off < size) {
-        ssize_t wanted = size - off;
-        ssize_t actual = read(fd, buf + off, wanted);
-        if (actual < 0) {
-            free(buf);
-            return false;
-        }
-        if (!actual) break;
-
-        off += actual;
+    bool ok = read_fully(fd, buf, size);
+    int orig_errno = errno;
+    close(fd);
+    if (!ok) {
+        free(buf);
+        errno = orig_errno;
+        return false;
     }
 
     ptr = buf;
-    size = off;
     return true;
 }
 
@@ -261,4 +260,244 @@ void libboot_handover(andromeda_cpu_regs_t *regs) {
     if (cpu_fd < 0) return;
 
     ioctl(cpu_fd, IOCTL_SET_REGISTERS, regs);
+}
+
+struct libboot_video_card {
+    int fd;
+    andromeda_video_mode_t *modes;
+    ssize_t num_modes;
+    void *edid;
+    size_t edid_size;
+    bool tried_edid;
+};
+
+static libboot_video_card_t *video_cards;
+static size_t num_video_cards;
+
+bool libboot_video_init(unsigned) {
+    static bool did_init = false;
+    if (did_init) return true;
+
+    int dirfd = open("/dev/video", O_DIRECTORY | O_RDONLY);
+    if (dirfd < 0) return false;
+
+    DIR *dir = fdopendir(dirfd);
+    if (!dir) {
+        int orig_errno = errno;
+        close(dirfd);
+        errno = orig_errno;
+        return false;
+    }
+
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (!entry) {
+            if (errno) goto cleanup;
+            break;
+        }
+
+        if (entry->d_name[0] == '.') {
+            if (entry->d_name[1] == 0 || (entry->d_name[1] == '.' && entry->d_name[2] == 0)) {
+                continue;
+            }
+        }
+
+        int fd = openat(dirfd, entry->d_name, O_RDWR);
+        if (fd < 0) goto cleanup;
+
+        size_t idx = num_video_cards++;
+        video_cards = realloc(video_cards, num_video_cards * sizeof(*video_cards));
+        memset(&video_cards[idx], 0, sizeof(*video_cards));
+        video_cards[idx].fd = fd;
+        video_cards[idx].num_modes = -1;
+    }
+
+    closedir(dir);
+    did_init = true;
+    return true;
+cleanup:
+    int orig_errno = errno;
+    closedir(dir);
+
+    for (size_t i = 0; i < num_video_cards; i++) {
+        close(video_cards[i].fd);
+        free(video_cards[i].modes);
+    }
+
+    free(video_cards);
+    num_video_cards = 0;
+
+    errno = orig_errno;
+    return false;
+}
+
+bool libboot_video_get_console_fb(andromeda_framebuffer_t *out) {
+    static andromeda_framebuffer_t fb;
+    static bool have_fb;
+
+    if (have_fb) {
+        if (!fb.mode.pitch) {
+            errno = ENOENT;
+            return false;
+        }
+
+        *out = fb;
+        return true;
+    }
+
+    int fd = open("/sys/console-framebuffer", O_RDONLY);
+    if (fd < 0) {
+        if (errno == ENOENT) have_fb = true;
+        return false;
+    }
+
+    bool ok = read_fully(fd, &fb, sizeof(fb));
+    int orig_errno = errno;
+    close(fd);
+    if (!ok) {
+        errno = orig_errno;
+        return false;
+    }
+
+    have_fb = true;
+    *out = fb;
+    return true;
+}
+
+size_t libboot_video_num_cards() {
+    return num_video_cards;
+}
+
+libboot_video_card_t *libboot_video_get_card(size_t idx) {
+    assert(idx < num_video_cards);
+    return &video_cards[idx];
+}
+
+ssize_t libboot_video_discover_modes(libboot_video_card_t *card) {
+    if (card->num_modes >= 0) return card->num_modes;
+
+    andromeda_video_modes_t buffer = {};
+    int count = ioctl(card->fd, IOCTL_LIST_MODES, &buffer);
+    if (count < 0) return -1;
+
+    buffer.modes = malloc(count * sizeof(*buffer.modes));
+    buffer.capacity = count;
+
+    count = ioctl(card->fd, IOCTL_LIST_MODES, &buffer);
+    if (count < 0) {
+        int orig_errno = errno;
+        free(buffer.modes);
+        errno = orig_errno;
+        return -1;
+    }
+
+    card->modes = buffer.modes;
+    card->num_modes = count;
+    return count;
+}
+
+const andromeda_video_mode_t *libboot_video_get_mode(libboot_video_card_t *card, size_t mode) {
+    assert(card->num_modes >= 0);
+    assert(mode < (size_t)card->num_modes);
+
+    return &card->modes[mode];
+}
+
+static bool ensure_edid_available(libboot_video_card_t *card) {
+    assert(card->num_modes >= 0);
+
+    if (card->tried_edid) {
+        if (card->edid) return true;
+        errno = ENODATA;
+        return false;
+    }
+
+    andromeda_edid_request_t request = {};
+    int size = ioctl(card->fd, IOCTL_GET_EDID, &request);
+    if (size < 0) {
+        if (errno == ENODATA) card->tried_edid = true;
+        return false;
+    }
+
+    request.buffer = malloc(size);
+    request.capacity = size;
+
+    size = ioctl(card->fd, IOCTL_GET_EDID, &request);
+    if (size < 0) {
+        int orig_errno = errno;
+        free(request.buffer);
+        errno = orig_errno;
+        return false;
+    }
+
+    card->edid = request.buffer;
+    card->edid_size = size;
+    card->tried_edid = true;
+    return true;
+}
+
+const void *libboot_video_get_edid_data(libboot_video_card_t *card, size_t *size_out) {
+    if (!ensure_edid_available(card)) return nullptr;
+
+    *size_out = card->edid_size;
+    return card->edid;
+}
+
+ssize_t libboot_video_pick_mode(libboot_video_card_t *card, ssize_t wanted_width, ssize_t wanted_height) {
+    if (wanted_width < 0 || wanted_height < 0) {
+        if (ensure_edid_available(card)) {
+            edid_t *edid = card->edid;
+
+            if (wanted_width < 0) {
+                wanted_width = edid->pref_timing.width_low | ((edid->pref_timing.width_hblank_high & 0xf0) << 4);
+            }
+
+            if (wanted_height < 0) {
+                wanted_height = edid->pref_timing.height_low | ((edid->pref_timing.height_vblank_high & 0xf0) << 4);
+            }
+        } else if (errno != ENODATA) {
+            return -1;
+        } else {
+            // If we don't know what to do for a given dimension, just pick the largest possible
+            if (wanted_width < 0) wanted_width = SSIZE_MAX;
+            if (wanted_height < 0) wanted_height = SSIZE_MAX;
+        }
+    }
+
+    ssize_t candidate = -1;
+    uint64_t cur_size_dist = UINT64_MAX;
+    unsigned cur_depth = 0;
+
+    for (ssize_t i = 0; i < card->num_modes; i++) {
+        const andromeda_video_mode_t *mode = &card->modes[i];
+        if (mode->memory_model != ANDROMEDA_MEMORY_MODEL_RGB) continue;
+
+        // Pick the resolution closest to the one the user asked for
+        ssize_t wdist = (ssize_t)mode->width - wanted_width;
+        ssize_t hdist = (ssize_t)mode->height - wanted_height;
+        uint64_t size_dist = (int64_t)wdist * wdist + (int64_t)hdist * hdist;
+
+        if (size_dist > cur_size_dist) continue;
+        if (size_dist == cur_size_dist && mode->bits_per_pixel < cur_depth) continue;
+
+        candidate = i;
+        cur_size_dist = size_dist;
+        cur_depth = mode->bits_per_pixel;
+    }
+
+    if (candidate < 0) errno = ENODATA;
+    return candidate;
+}
+
+int libboot_video_set_mode(libboot_video_card_t *card, andromeda_framebuffer_t *buf, size_t mode) {
+    assert(card->num_modes >= 0);
+    assert(mode < (size_t)card->num_modes);
+
+    andromeda_framebuffer_request_t request = {.mode_index = mode};
+    int fd = ioctl(card->fd, IOCTL_SET_MODE, &request);
+    if (fd < 0) return -1;
+
+    *buf = request.framebuffer;
+    return fd;
 }

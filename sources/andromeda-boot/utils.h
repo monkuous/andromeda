@@ -3,6 +3,7 @@
 #include "libboot.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,4 +72,21 @@ static inline void *alloc_pages(paddr_t *phys, size_t size, size_t align, int ty
         exit(1);
     }
     return ptr;
+}
+
+static inline bool read_fully(int fd, void *buffer, size_t size) {
+    while (size) {
+        ssize_t wanted = size < SSIZE_MAX ? size : SSIZE_MAX;
+        ssize_t actual = read(fd, buffer, wanted);
+        if (actual < 0) return false;
+        if (!actual) {
+            errno = ENODATA;
+            return false;
+        }
+
+        buffer += actual;
+        size -= actual;
+    }
+
+    return true;
 }

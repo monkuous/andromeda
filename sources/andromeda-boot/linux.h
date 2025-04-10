@@ -87,6 +87,14 @@ typedef struct [[gnu::packed]] {
     uint8_t reserved[2];
 } screen_info_t;
 
+#define VIDEO_TYPE_VGAC 0x22
+#define VIDEO_TYPE_VLFB 0x23
+
+#define VIDEO_FLAGS_NO_CURSOR (1u << 0)
+
+#define VIDEO_CAPABILITY_SKIP_QUIRKS (1u << 0)
+#define VIDEO_CAPABILITY_64BIT_BASE (1u << 1)
+
 typedef struct [[gnu::packed]] {
     uint16_t version;
     uint16_t cseg;

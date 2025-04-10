@@ -3,6 +3,7 @@
 #include "utils.h"
 #include <andromeda/cpu.h>
 #include <andromeda/memory.h>
+#include <andromeda/video.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -16,6 +17,8 @@
 #define PROTOCOL_MIN PROTOCOL_2_05
 
 const char *progname;
+static ssize_t user_width = -1;
+static ssize_t user_height = -1;
 
 typedef struct {
     uint64_t gdt[4];
@@ -86,6 +89,90 @@ static void fill_acpi(boot_params_t *params) {
     }
 }
 
+static void fill_video_fb(screen_info_t *info, andromeda_framebuffer_t *fb) {
+    info->flags = VIDEO_FLAGS_NO_CURSOR;
+
+    switch (fb->mode.memory_model) {
+    case ANDROMEDA_MEMORY_MODEL_CGA_TEXT:
+        info->orig_video_isVGA = VIDEO_TYPE_VGAC;
+        info->orig_video_mode = 3;
+        info->orig_video_ega_bx = 3;
+        info->orig_video_cols = fb->mode.width;
+        info->orig_video_lines = fb->mode.height;
+        info->orig_video_points = 16;
+        break;
+    case ANDROMEDA_MEMORY_MODEL_RGB:
+        info->orig_video_isVGA = VIDEO_TYPE_VLFB;
+        info->capabilities = VIDEO_CAPABILITY_64BIT_BASE | VIDEO_CAPABILITY_SKIP_QUIRKS;
+        info->lfb_base = fb->address;
+        info->ext_lfb_base = fb->address >> 32;
+        info->lfb_size = fb->mode.pitch * fb->mode.height;
+        info->lfb_linelength = fb->mode.pitch;
+        info->lfb_width = fb->mode.width;
+        info->lfb_height = fb->mode.height;
+        info->lfb_depth = fb->mode.bits_per_pixel;
+        info->red_size = fb->mode.rgb.red.mask_size;
+        info->red_pos = fb->mode.rgb.red.field_pos;
+        info->green_size = fb->mode.rgb.green.mask_size;
+        info->green_pos = fb->mode.rgb.green.field_pos;
+        info->blue_size = fb->mode.rgb.blue.mask_size;
+        info->blue_pos = fb->mode.rgb.blue.field_pos;
+        break;
+    }
+}
+
+static void fill_video_consolefb(screen_info_t *info) {
+    andromeda_framebuffer_t fb;
+
+    if (libboot_video_get_console_fb(&fb)) {
+        fill_video_fb(info, &fb);
+    }
+}
+
+static bool fill_video_pick(boot_params_t *params) {
+    size_t cards = libboot_video_num_cards();
+
+    for (size_t i = 0; i < cards; i++) {
+        libboot_video_card_t *card = libboot_video_get_card(i);
+        ssize_t nmodes = libboot_video_discover_modes(card);
+        if (nmodes < 0) {
+            fprintf(stderr, "%s: failed to get video mode list: %m\n", progname);
+            exit(1);
+        }
+        if (nmodes == 0) continue;
+
+        ssize_t mode = libboot_video_pick_mode(card, user_width, user_height);
+        if (mode < 0) {
+            if (errno == ENODATA) continue;
+            fprintf(stderr, "%s: failed to pick video mode: %m\n", progname);
+            exit(1);
+        }
+
+        andromeda_framebuffer_t fb;
+        int fd = libboot_video_set_mode(card, &fb, mode);
+        if (fd < 0) {
+            fprintf(stderr, "%s: failed to set video mode: %m\n", progname);
+            exit(1);
+        }
+
+        fill_video_fb(&params->screen_info, &fb);
+
+        size_t edid_size;
+        const void *edid = libboot_video_get_edid_data(card, &edid_size);
+        if (edid) {
+            memcpy(&params->edid_info, edid, sizeof(params->edid_info));
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+static void fill_video(boot_params_t *info) {
+    if (!fill_video_pick(info)) fill_video_consolefb(&info->screen_info);
+}
+
 static void fill_boot_params(
         const linux_image_t *image,
         boot_params_t *params,
@@ -100,14 +187,7 @@ static void fill_boot_params(
     fill_setup_info(image, &params->setup_info, kernel_phys, start_data_phys);
     fill_e820(params);
     fill_acpi(params);
-
-    // todo: determine these values properly
-    params->screen_info.orig_video_mode = 3;
-    params->screen_info.orig_video_ega_bx = 3;
-    params->screen_info.orig_video_lines = 25;
-    params->screen_info.orig_video_cols = 80;
-    params->screen_info.orig_video_points = 16;
-    params->screen_info.orig_video_isVGA = 0x22;
+    fill_video(params);
 }
 
 static void load_kernel(const linux_image_t *image, uint32_t start_data_phys) {
@@ -170,7 +250,7 @@ int main(int argc, char *argv[]) {
     progname = argv[0];
 
     int c;
-    while ((c = getopt(argc, argv, "hi:")) != -1) {
+    while ((c = getopt(argc, argv, "hi:W:H:")) != -1) {
         switch (c) {
         case '?': return 2;
         case 'h':
@@ -178,10 +258,30 @@ int main(int argc, char *argv[]) {
                    "\n"
                    "options:\n"
                    "  -h        show this help message\n"
-                   "  -i FILE   load FILE as initrd (can be specified multiple times)\n",
+                   "  -i FILE   load FILE as initrd (can be specified multiple times)\n"
+                   "  -W NUM    try to pick a video mode with a width of NUM pixels\n"
+                   "  -H NUM    try to pick a video mode with a height of NUM pixels\n",
                    argv[0]);
             return 0;
         case 'i': add_initrd(optarg); break;
+        case 'W': {
+            char *end;
+            user_width = strtol(optarg, &end, 10);
+            if (*end) {
+                fprintf(stderr, "%s: -w: invalid argument\n", argv[0]);
+                return 1;
+            }
+            break;
+        }
+        case 'H': {
+            char *end;
+            user_height = strtol(optarg, &end, 10);
+            if (*end) {
+                fprintf(stderr, "%s: -w: invalid argument\n", argv[0]);
+                return 1;
+            }
+            break;
+        }
         }
     }
 
@@ -212,7 +312,12 @@ int main(int argc, char *argv[]) {
     }
 
     if (!libboot_mem_init(0)) {
-        fprintf(stderr, "%s: failed to initialize memory: %m", argv[0]);
+        fprintf(stderr, "%s: failed to initialize memory: %m\n", argv[0]);
+        return 1;
+    }
+
+    if (!libboot_video_init(0)) {
+        fprintf(stderr, "%s: failed to initialize video: %m\n", argv[0]);
         return 1;
     }
 
