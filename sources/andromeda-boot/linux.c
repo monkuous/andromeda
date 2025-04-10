@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
             printf("usage: %s [OPTION...] KERNEL [CMDLINE]\n"
                    "\n"
                    "options:\n"
-                   "  -h        show this help message"
+                   "  -h        show this help message\n"
                    "  -i FILE   load FILE as initrd (can be specified multiple times)\n",
                    argv[0]);
             return 0;
