@@ -171,7 +171,7 @@ static bool iter_modes(vbe_info_t *controller, void (*cb)(vbe_mode_t *mode, void
                                                 .bits_per_pixel = info.bits_per_pixel,
                                         },
                         },
-                .vbe_mode = (mode & ~0x800) | 0x8000,
+                .vbe_mode = (mode & ~0x800) | 0x4000,
         };
 
         switch (info.memory_model) {
