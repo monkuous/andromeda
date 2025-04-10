@@ -1,5 +1,5 @@
 #include "vt.h"
-#include "drv/console/scancode.h"
+#include "drv/console/keyboard.h"
 #include "drv/console/screen.h"
 #include "init/bios.h"
 #include "mem/pmap.h"
@@ -226,7 +226,7 @@ static void process_esc_init(uint32_t cp) {
     case 'E': emit_lf(); break;
     case 'H': set_tab_stop(vt_state.x); break;
     case 'M':
-    reverse_lf();
+        reverse_lf();
         if (vt_state.y > 0) vt_state.y -= 1;
         break;
     case 'Z': inject_id(); break;
@@ -374,7 +374,7 @@ static void insert_chars(unsigned count) {
     unsigned x = SCREEN_WIDTH - 1;
 
     for (unsigned i = rem; i > 0; i--, x--) {
-        if (i > count) screen_set_char(x, vt_state.y + base_y, screen_get_char(x, vt_state.y + base_y));
+        if (i > count) screen_set_char(x, vt_state.y + base_y, screen_get_char(x - count, vt_state.y + base_y));
         else do_set_char(x, vt_state.y + base_y, val);
     }
 }
@@ -1045,13 +1045,6 @@ static void inject_input(const void *data, size_t count) {
     injected_input_cnt = new_count;
 }
 
-static void on_app_key(char code, bool app_mode) {
-    unsigned char buf[2];
-    buf[0] = app_mode ? 'O' : '[';
-    buf[1] = code;
-    inject_input(buf, sizeof(buf));
-}
-
 static bool pop_injected(uint8_t *out) {
     if (injected_input_cnt) {
         *out = *injected_input++;
@@ -1062,88 +1055,222 @@ static bool pop_injected(uint8_t *out) {
     return false;
 }
 
-#define SHIFT_RSHIFT 1
-#define SHIFT_LSHIFT 2
-#define SHIFT_SHIFT (SHIFT_LSHIFT | SHIFT_RSHIFT)
-#define SHIFT_CONTROL 4
-#define SHIFT_ALT 8
+static uint8_t process_letter(uint16_t key) {
+    uint8_t value = 'a' + KVAL(key);
+    if (key & KF_SHIFT) value -= 0x20;
+    if (key & KF_CONTROL) value &= ~0x60;
 
-static bool shift_state(unsigned mask) {
-    regs_t regs = {.eax = 0x200};
-    intcall(0x16, &regs);
-    return (regs.eax & mask) == mask;
+    if (key & KF_ALT) {
+        inject_input(&value, 1);
+        return 0x1b;
+    }
+
+    return value;
 }
 
-static void keypad(uint8_t kpdc, uint8_t appc) {
-    bool app_mode = mode & MODE_KEYPAD_APPLICATION;
-    on_app_key(app_mode ? appc : kpdc, app_mode);
+static uint8_t process_digit(uint16_t key) {
+    uint8_t value;
+
+    if (key & KF_SHIFT) value = ")!@#$%^&*("[KVAL(key)];
+    else value = '0' + KVAL(key);
+
+    if (key & KF_CONTROL) {
+        if (value == '0' || value == '@') value = 0;
+        else if (value == '3') value = 0x1b;
+        else if (value == '4') value = 0x1c;
+        else if (value == '5') value = 0x1d;
+        else if (value == '6') value = 0x1e;
+        else if (value == '7') value = 0x1f;
+        else if (value == '8') value = 0x7f;
+        else return 0xff;
+    }
+
+    if (key & KF_ALT) {
+        if (value == 0x1b || value == 0x1d || value == 0x1e) return 0xff;
+        inject_input(&value, 1);
+        return 0x1b;
+    }
+
+    return value;
 }
 
-static uint8_t process_keypress(uint16_t scancode, uint8_t ascii) {
-    if ((mode & MODE_KEYPAD_APPLICATION) && (scancode == SCANCODE_KEYPAD_5 || scancode == SCANCODE_KEYPAD_STAR ||
-                                             scancode == SCANCODE_KEYPAD_MINUS || scancode == SCANCODE_KEYPAD_PLUS)) {
-        ascii = 0;
+static uint8_t process_symbol(uint16_t key) {
+    uint8_t value;
+
+    if (key & KF_SHIFT) value = " \"<_>?:+{|}~"[KVAL(key)];
+    else value = " ',-./;=[\\]`"[KVAL(key)];
+
+    if (key & KF_CONTROL) {
+        if (value == ' ') {
+            if (key & KF_SHIFT) goto after_control;
+            value = 0;
+        } else if (value == '`') value = 0;
+        else if (value == '\'') value = 7;
+        else if (value == '-' || value == '/' || value == '_') value = 0x1f;
+        else if (value == '[') value = 0x1b;
+        else if (value == '\\') value = 0x1c;
+        else if (value == ']') value = 0x1d;
+        else if (value == '?') value = 0x7f;
+        else return 0xff;
+    }
+after_control:
+
+    if (key & KF_ALT) {
+        if ((key & (KF_CONTROL | KF_SHIFT)) == (KF_CONTROL | KF_SHIFT)) return 0xff;
+        if (value == 7 || value == 0x1b || value == 0x1c || value == 0x7f) return 0xff;
+        if (value != 0x20 || !(key & KF_SHIFT)) inject_input(&value, 1);
+        return 0x1b;
     }
 
-    if (ascii) {
-        if (shift_state(SHIFT_CONTROL)) ascii &= ~0x60;
+    return value;
+}
 
-        if (ascii == '\b') return 0x7f;
-        if (ascii == '\r' && (mode & MODE_AUTO_CR)) inject_input("\n", 1);
+static uint8_t process_numpad(uint16_t key) {
+    if (KVAL(key) >= 11) return "\r*+-/"[KVAL(key) - 11];
+    if ((key & (KF_CONTROL | KF_SHIFT | KF_ALT)) == KF_ALT) return 0xff;
+    if (key & KF_NUM_LOCK) return "0123456789\r.*+-/"[KVAL(key)];
 
-        return ascii;
+    if (!(key & KF_SHIFT) && (mode & MODE_KEYPAD_APPLICATION)) {
+        switch (key & 0xfff) {
+        case K_NUM_0: inject_input("Op", 2); return 0x1b;
+        case K_NUM_1: inject_input("Oq", 2); return 0x1b;
+        case K_NUM_2: inject_input("Or", 2); return 0x1b;
+        case K_NUM_3: inject_input("Os", 2); return 0x1b;
+        case K_NUM_4: inject_input("Ot", 2); return 0x1b;
+        case K_NUM_5: inject_input("Ou", 2); return 0x1b;
+        case K_NUM_6: inject_input("Ov", 2); return 0x1b;
+        case K_NUM_7: inject_input("Ow", 2); return 0x1b;
+        case K_NUM_8: inject_input("Ox", 2); return 0x1b;
+        case K_NUM_9: inject_input("Oy", 2); return 0x1b;
+        case K_NUM_DOT: inject_input("On", 2); return 0x1b;
+        default: UNREACHABLE();
+        }
     }
 
-    switch (scancode) {
-    case SCANCODE_ESCAPE: return 0x1b;
-    case SCANCODE_ARROW_UP: on_app_key('A', mode & MODE_CURSOR_APPLICATION); return 0x1b;
-    case SCANCODE_ARROW_DOWN: on_app_key('B', mode & MODE_CURSOR_APPLICATION); return 0x1b;
-    case SCANCODE_ARROW_RIGHT: on_app_key('C', mode & MODE_CURSOR_APPLICATION); return 0x1b;
-    case SCANCODE_ARROW_LEFT: on_app_key('D', mode & MODE_CURSOR_APPLICATION); return 0x1b;
-    case SCANCODE_HOME: inject_input("[1~", 3); return 0x1b;
-    case SCANCODE_INSERT: inject_input("[2~", 3); return 0x1b;
-    case SCANCODE_DELETE: inject_input("[3~", 3); return 0x1b;
-    case SCANCODE_END: inject_input("[4~", 3); return 0x1b;
-    case SCANCODE_PAGE_UP: inject_input("[5~", 3); return 0x1b;
-    case SCANCODE_PAGE_DOWN: inject_input("[6~", 3); return 0x1b;
-    case SCANCODE_KEYPAD_5: keypad('G', 'u'); return 0x1b;
-    case SCANCODE_KEYPAD_STAR: on_app_key('R', mode & MODE_KEYPAD_APPLICATION); return 0x1b;
-    case SCANCODE_KEYPAD_MINUS: on_app_key('m', mode & MODE_KEYPAD_APPLICATION); return 0x1b;
-    case SCANCODE_KEYPAD_PLUS: on_app_key('l', mode & MODE_KEYPAD_APPLICATION); return 0x1b;
-    case SCANCODE_F1: inject_input("[[A", 3); return 0x1b;
-    case SCANCODE_F2: inject_input("[[B", 3); return 0x1b;
-    case SCANCODE_F3: inject_input("[[C", 3); return 0x1b;
-    case SCANCODE_F4: inject_input("[[D", 3); return 0x1b;
-    case SCANCODE_F5: inject_input("[[E", 3); return 0x1b;
-    case SCANCODE_F6: inject_input("[17~", 4); return 0x1b;
-    case SCANCODE_F7: inject_input("[18~", 4); return 0x1b;
-    case SCANCODE_F8: inject_input("[19~", 4); return 0x1b;
-    case SCANCODE_F9: inject_input("[20~", 4); return 0x1b;
-    case SCANCODE_F10: inject_input("[21~", 4); return 0x1b;
-    case SCANCODE_F11: inject_input("[23~", 4); return 0x1b;
-    case SCANCODE_F12: inject_input("[24~", 4); return 0x1b;
-    default: printk("unrecognized scancode: 0x%x\n", scancode);
+    switch (key & 0xfff) {
+    case K_NUM_0: inject_input("[2~", 3); return 0x1b;
+    case K_NUM_1: inject_input("[4~", 3); return 0x1b;
+    case K_NUM_2: inject_input("[B", 2); return 0x1b;
+    case K_NUM_3: inject_input("[6~", 3); return 0x1b;
+    case K_NUM_4: inject_input("[D", 2); return 0x1b;
+    case K_NUM_5: inject_input("[G", 2); return 0x1b;
+    case K_NUM_6: inject_input("[C", 2); return 0x1b;
+    case K_NUM_7: inject_input("[1~", 3); return 0x1b;
+    case K_NUM_8: inject_input("[A", 2); return 0x1b;
+    case K_NUM_9: inject_input("[5~", 3); return 0x1b;
+    case K_NUM_DOT: inject_input("[3~", 3); return 0x1b;
+    default: UNREACHABLE();
+    }
+}
+
+static uint8_t process_arrow(uint16_t key) {
+    unsigned char buf[2];
+    buf[0] = (mode & MODE_CURSOR_APPLICATION) ? 'O' : '[';
+    buf[1] = 'A' + KVAL(key);
+    inject_input(buf, sizeof(buf));
+    return 0x1b;
+}
+
+static uint8_t process_function(uint16_t key) {
+    if (key & (KF_CONTROL | KF_ALT)) return 0xff;
+
+    if (key & KF_SHIFT) {
+        switch (key & 0xfff) {
+        case K_F1: inject_input("[25~", 4); return 0x1b;
+        case K_F2: inject_input("[26~", 4); return 0x1b;
+        case K_F3: inject_input("[28~", 4); return 0x1b;
+        case K_F4: inject_input("[29~", 4); return 0x1b;
+        case K_F5: inject_input("[31~", 4); return 0x1b;
+        case K_F6: inject_input("[32~", 4); return 0x1b;
+        case K_F7: inject_input("[33~", 4); return 0x1b;
+        case K_F8: inject_input("[34~", 4); return 0x1b;
+        default: return 0xff;
+        }
     }
 
-    if (pop_injected(&ascii)) return ascii;
+    switch (KVAL(key)) {
+    case K_F1: inject_input("[[A", 3); return 0x1b;
+    case K_F2: inject_input("[[B", 3); return 0x1b;
+    case K_F3: inject_input("[[C", 3); return 0x1b;
+    case K_F4: inject_input("[[D", 3); return 0x1b;
+    case K_F5: inject_input("[[E", 3); return 0x1b;
+    case K_F6: inject_input("[17~", 4); return 0x1b;
+    case K_F7: inject_input("[18~", 4); return 0x1b;
+    case K_F8: inject_input("[19~", 4); return 0x1b;
+    case K_F9: inject_input("[20~", 4); return 0x1b;
+    case K_F10: inject_input("[21~", 4); return 0x1b;
+    case K_F11: inject_input("[23~", 4); return 0x1b;
+    case K_F12: inject_input("[24~", 4); return 0x1b;
+    default: UNREACHABLE();
+    }
+}
 
-    return 0xff;
+static uint8_t process_control(uint16_t key) {
+    unsigned mods = key & (KF_CONTROL | KF_SHIFT | KF_ALT);
+    if (mods == (KF_CONTROL | KF_SHIFT | KF_ALT)) return 0xff;
+
+    switch (key & 0xfff) {
+    case K_ESCAPE: return 0x1b;
+    case K_PRINT:
+        if (mods & KF_CONTROL) {
+            inject_input("\x1c", 1);
+            return 0x1b;
+        } else if (mods & KF_ALT) {
+            return 0x1c;
+        }
+
+        return 0xff;
+    case K_PAUSE: inject_input("[P", 2); return 0x1b;
+    case K_INSERT: inject_input("[2~", 3); return 0x1b;
+    case K_DELETE: inject_input("[3~", 3); return 0x1b;
+    case K_BACKSPACE:
+        if (mods & KF_ALT) {
+            inject_input("\x7f", 1);
+            return 0x1b;
+        }
+        return 0x7f;
+    case K_HOME: inject_input("[1~", 3); return 0x1b;
+    case K_END: inject_input("[4~", 3); return 0x1b;
+    case K_PAGE_UP: inject_input("[5~", 3); return 0x1b;
+    case K_PAGE_DOWN: inject_input("[6~", 3); return 0x1b;
+    case K_TAB:
+        if (((mods & KF_ALT) && !(mods & KF_SHIFT)) || (!(mods & KF_ALT) && (mods & KF_SHIFT))) {
+            inject_input("\t", 1);
+            return 0x1b;
+        }
+        return '\t';
+    case K_ENTER:
+        if (mods & KF_ALT) {
+            inject_input("\r", 1);
+            return 0x1b;
+        }
+
+        if (mode & MODE_AUTO_CR) inject_input("\n", 1);
+        return '\r';
+    default: UNREACHABLE();
+    }
+}
+
+static uint8_t process_keypress(uint16_t key) {
+    switch (KCAT(key)) {
+    case KC_LETTER: return process_letter(key);
+    case KC_DIGIT: return process_digit(key);
+    case KC_SYMBOL: return process_symbol(key);
+    case KC_NUMPAD: return process_numpad(key);
+    case KC_ARROW: return process_arrow(key);
+    case KC_FUNCTION: return process_function(key);
+    case KC_CONTROL: return process_control(key);
+    default: UNREACHABLE();
+    }
 }
 
 bool vt_read_byte(uint8_t *out) {
     if (pop_injected(out)) return true;
 
-    regs_t regs = {.eax = 0x100};
-    intcall(0x16, &regs);
-    if (regs.eflags & 0x40) return false;
+    uint16_t key = keyboard_read();
+    if (!key) return false;
 
-    regs = (regs_t){};
-    intcall(0x16, &regs);
-
-    uint8_t scancode = (regs.eax >> 8) & 0xff;
-    uint8_t ascii = regs.eax & 0xff;
-
-    uint8_t value = process_keypress(scancode, ascii);
+    uint8_t value = process_keypress(key);
     if (value == 0xff) return false;
 
     *out = value;

@@ -17,6 +17,7 @@ kernel_elf = executable(
     'cpu/idt.S',
     'drv/biosdisk.c',
     'drv/console/console.c',
+    'drv/console/keyboard.c',
     'drv/console/screen.c',
     'drv/console/vt.c',
     'drv/cpu.c',
