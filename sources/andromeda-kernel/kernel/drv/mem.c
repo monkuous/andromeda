@@ -23,9 +23,20 @@ static int dev_mem_seek(file_t *self, uint64_t *offset, int whence) {
     }
 }
 
-static int dev_mem_op(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos, bool write) {
-    uint32_t available;
-    if (offset < UINT32_MAX) available = UINT32_MAX - offset + 1;
+static int do_dev_mem_op(
+        file_t *self,
+        void *buffer,
+        size_t *size,
+        uint64_t offset,
+        bool update_pos,
+        bool write,
+        uint64_t base,
+        uint64_t max
+) {
+    max = (max - 1) + base;
+
+    uint64_t available;
+    if (offset < max) available = max - offset + 1;
     else available = 0;
 
     size_t remaining = *size;
@@ -39,8 +50,10 @@ static int dev_mem_op(file_t *self, void *buffer, size_t *size, uint64_t offset,
 
         int error;
 
-        if (write) error = user_memcpy(pmap_tmpmap(offset - pgoff) + pgoff, buffer, cur);
-        else error = user_memcpy(buffer, pmap_tmpmap(offset - pgoff) + pgoff, cur);
+        void *physptr = pmap_tmpmap(offset - pgoff + base) + pgoff;
+
+        if (write) error = user_memcpy(physptr, buffer, cur);
+        else error = user_memcpy(buffer, physptr, cur);
 
         if (unlikely(error)) return error;
 
@@ -50,6 +63,52 @@ static int dev_mem_op(file_t *self, void *buffer, size_t *size, uint64_t offset,
     }
 
     if (update_pos) self->position = offset;
+    *size = total;
+    return 0;
+}
+
+struct dmop_ctx {
+    file_t *file;
+    void *buffer;
+    uint64_t pbase;
+    uint64_t last_end;
+    bool update_pos;
+    bool write;
+    int error;
+};
+
+static bool dmop_cb(uint64_t head, uint64_t tail, void *ptr) {
+    struct dmop_ctx *ctx = ptr;
+
+    if (head != ctx->last_end) {
+        ctx->error = user_memset(ctx->buffer + (ctx->last_end - ctx->pbase), 0, head - ctx->last_end);
+        if (unlikely(ctx->error)) return false;
+    }
+
+    uint64_t requested = (tail - head) + 1;
+    size_t size = requested < 0xffffffff ? requested : 0xffffffff;
+    ctx->error = do_dev_mem_op(
+            ctx->file,
+            ctx->buffer + (head - ctx->pbase),
+            &size,
+            head,
+            ctx->update_pos,
+            ctx->write,
+            0,
+            UINT32_MAX
+    );
+    if (unlikely(ctx->error)) return false;
+    if (size) ctx->last_end = head + size;
+
+    return size == requested;
+}
+
+static int dev_mem_op(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos, bool write) {
+    struct dmop_ctx ctx = {self, buffer, offset, offset, update_pos, write, 0};
+    bootmem_iter_nonusable(offset, offset + (*size - 1), dmop_cb, &ctx);
+    if (unlikely(ctx.error)) return ctx.error;
+
+    size_t total = ctx.last_end - offset;
     *size = total;
     return 0;
 }
@@ -101,6 +160,42 @@ static void pmalloc_file_free(file_t *ptr) {
     vmfree(data, sizeof(*data));
 }
 
+static int pmalloc_file_seek(file_t *self, uint64_t *offset, int whence) {
+    switch (whence) {
+    case SEEK_SET: return 0;
+    case SEEK_CUR: *offset += self->position; return 0;
+    default: return EINVAL;
+    }
+}
+
+static int pmalloc_file_read(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos) {
+    pmalloc_data_t *data = self->priv;
+    return do_dev_mem_op(
+            self,
+            buffer,
+            size,
+            offset,
+            update_pos,
+            false,
+            page_to_phys(data->page),
+            (uint64_t)data->count << PAGE_SHIFT
+    );
+}
+
+static int pmalloc_file_write(file_t *self, void *buffer, size_t *size, uint64_t offset, bool update_pos) {
+    pmalloc_data_t *data = self->priv;
+    return do_dev_mem_op(
+            self,
+            buffer,
+            size,
+            offset,
+            update_pos,
+            true,
+            page_to_phys(data->page),
+            (uint64_t)data->count << PAGE_SHIFT
+    );
+}
+
 static void pmalloc_file_mmap(file_t *self, uintptr_t head, uintptr_t tail, uint64_t offset, int, int prot) {
     pmalloc_data_t *data = self->priv;
     uint32_t max = (data->count << PAGE_SHIFT) - 1;
@@ -115,6 +210,9 @@ static void pmalloc_file_mmap(file_t *self, uintptr_t head, uintptr_t tail, uint
 
 static const file_ops_t pmalloc_file_ops = {
         .free = pmalloc_file_free,
+        .seek = pmalloc_file_seek,
+        .read = pmalloc_file_read,
+        .write = pmalloc_file_write,
         .mmap = pmalloc_file_mmap,
 };
 
