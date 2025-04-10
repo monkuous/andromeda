@@ -37,7 +37,7 @@ static void fill_setup_info(const linux_image_t *, setup_info_t *info, paddr_t k
 
     if (tot_initrd_size) {
         initrd_phys = UINT32_MAX;
-        void *virt = libboot_mem_alloc_pages(&initrd_phys, tot_initrd_size, 1, 0);
+        void *virt = alloc_pages(&initrd_phys, tot_initrd_size, 1, 0);
 
         for (size_t i = 0; i < num_initrd; i++) {
             printf("loading initrd %s\n", initrds[i].path);
@@ -125,8 +125,8 @@ static void load_kernel(const linux_image_t *image, uint32_t start_data_phys) {
     printf("init_size: 0x%x\n", image->info.init_size);
 
     paddr_t kernel_phys = UINT32_MAX, params_phys = UINT32_MAX;
-    void *kernel = libboot_mem_alloc_pages(&kernel_phys, image->info.init_size, image->info.kernel_alignment, 0);
-    void *params = libboot_mem_alloc_pages(&params_phys, sizeof(boot_params_t), 0x1000, 0);
+    void *kernel = alloc_pages(&kernel_phys, image->info.init_size, image->info.kernel_alignment, 0);
+    void *params = alloc_pages(&params_phys, sizeof(boot_params_t), 0x1000, 0);
 
     printf("allocated memory for kernel at 0x%llx (mapped to %p)\n", kernel_phys, kernel);
     printf("zero page at 0x%llx (%p)\n", params_phys, params);
@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
     }
 
     uint64_t start_data_phys = UINT32_MAX;
-    start_data_t *start_data = libboot_mem_alloc_pages(
+    start_data_t *start_data = alloc_pages(
             &start_data_phys,
             offsetof(start_data_t, cmdline) + strlen(cmdline) + 1,
             alignof(start_data_t),

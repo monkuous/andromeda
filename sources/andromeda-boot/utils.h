@@ -1,5 +1,6 @@
 #pragma once
 
+#include "libboot.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
@@ -58,4 +59,13 @@ static inline const void *mmap_file(const char *path, size_t *size_out) {
     }
 
     return mmap_fd(fd, path, size_out);
+}
+
+static inline void *alloc_pages(paddr_t *phys, size_t size, size_t align, int type) {
+    void *ptr = libboot_mem_alloc_pages(phys, size, align, type);
+    if (!ptr) {
+        fprintf(stderr, "%s: failed to allocate memory: %m\n", progname);
+        exit(1);
+    }
+    return ptr;
 }
