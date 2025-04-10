@@ -236,8 +236,8 @@ void pgcache_evict_specific(page_t *page) {
 
 static bool disable_evict(page_t *page) {
     if (page->is_cache) {
-        page->is_cache = false;
         lru_del(page);
+        page->is_cache = false;
         return true;
     }
 

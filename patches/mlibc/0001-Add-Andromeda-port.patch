@@ -1,4 +1,4 @@
-From 5b2d971ecf1bc5e9b68e46ebbb1997146ff92161 Mon Sep 17 00:00:00 2001
+From 91bba73d5ec4892d98f398886a0b86250d322faa Mon Sep 17 00:00:00 2001
 From: monkuous <84319635+monkuous@users.noreply.github.com>
 Date: Sun, 2 Mar 2025 22:07:04 +0100
 Subject: [PATCH] Add Andromeda port
@@ -80,12 +80,12 @@ Subject: [PATCH] Add Andromeda port
  sysdeps/andromeda/include/andromeda/mount.h   |  15 +
  sysdeps/andromeda/include/andromeda/string.h  |  11 +
  sysdeps/andromeda/include/andromeda/syscall.h |  91 ++
- sysdeps/andromeda/include/andromeda/video.h   |  51 ++
+ sysdeps/andromeda/include/andromeda/video.h   |  60 ++
  sysdeps/andromeda/include/meson.build         |  65 ++
  sysdeps/andromeda/include/mntent.h            |  43 +
  sysdeps/andromeda/include/sys/sysmacros.h     |  33 +
  sysdeps/andromeda/meson.build                 |  13 +
- 81 files changed, 2297 insertions(+), 14 deletions(-)
+ 81 files changed, 2306 insertions(+), 14 deletions(-)
  create mode 100644 sysdeps/andromeda/crt/Scrt0.S
  create mode 100644 sysdeps/andromeda/crt/crt0.S
  create mode 100644 sysdeps/andromeda/crt/crti.S
@@ -2858,10 +2858,10 @@ index 00000000..03c21367
 +#endif /* _ANDROMEDA_SYSCALL_H */
 diff --git a/sysdeps/andromeda/include/andromeda/video.h b/sysdeps/andromeda/include/andromeda/video.h
 new file mode 100644
-index 00000000..852effb5
+index 00000000..4e23f7b4
 --- /dev/null
 +++ b/sysdeps/andromeda/include/andromeda/video.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,60 @@
 +#ifndef _ANDROMEDA_VIDEO_H
 +#define _ANDROMEDA_VIDEO_H
 +
@@ -2872,37 +2872,42 @@ index 00000000..852effb5
 +#define ANDROMEDA_MEMORY_MODEL_RGB 1
 +
 +typedef struct {
-+    uint64_t pitch;
-+    uint32_t width;
-+    uint32_t height;
-+    uint8_t bits_per_pixel;
-+    uint8_t memory_model;
-+    union {
-+        struct {
-+            struct {
-+                uint8_t mask_size;
-+                uint8_t field_pos;
-+            } red, green, blue;
-+        } rgb;
-+    };
++	uint64_t pitch;
++	uint32_t width;
++	uint32_t height;
++	uint8_t bits_per_pixel;
++	uint8_t memory_model;
++	union {
++		struct {
++			struct {
++				uint8_t mask_size;
++				uint8_t field_pos;
++			} red, green, blue;
++		} rgb;
++	};
 +} andromeda_video_mode_t;
 +
 +typedef struct {
-+    uint64_t address;
-+    andromeda_video_mode_t mode;
++	uint64_t address;
++	andromeda_video_mode_t mode;
 +} andromeda_framebuffer_t;
 +
 +typedef struct {
-+    andromeda_framebuffer_t framebuffer;
-+    int flags;
-+    int mode_index;
++	andromeda_framebuffer_t framebuffer;
++	int flags;
++	int mode_index;
 +} andromeda_framebuffer_request_t;
 +
 +typedef struct {
-+    andromeda_video_mode_t *modes;
-+    size_t start;
-+    size_t capacity;
++	andromeda_video_mode_t *modes;
++	size_t start;
++	size_t capacity;
 +} andromeda_video_modes_t;
++
++typedef struct {
++	void *buffer;
++	size_t capacity;
++} andromeda_edid_request_t;
 +
 +/* in: andromeda_video_modes_t * (modes list gets filled)
 + * out: total number of modes */
@@ -2911,6 +2916,10 @@ index 00000000..852effb5
 +/* in: andromeda_framebuffer_request_t * (framebuffer field gets filled)
 + * out: fd representing framebuffer (when the last fd gets closed, the original mode is restored) */
 +#define IOCTL_SET_MODE 0x30001
++
++/* in: andromeda_edid_request_t * (buffer gets filled)
++ * out: edid data size */
++#define IOCTL_GET_EDID 0x30002
 +
 +#endif /* _ANDROMEDA_VIDEO_H */
 diff --git a/sysdeps/andromeda/include/meson.build b/sysdeps/andromeda/include/meson.build

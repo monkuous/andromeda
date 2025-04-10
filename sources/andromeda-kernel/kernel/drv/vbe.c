@@ -35,6 +35,8 @@
 #define VBE_MODEL_TEXT 0
 #define VBE_MODEL_DIRECT 6
 
+#define VBE_EDID_SIZE 128
+
 typedef struct [[gnu::packed]] {
     uint16_t offset;
     uint16_t segment;
@@ -117,6 +119,8 @@ static andromeda_framebuffer_t console_fb_data = {
 andromeda_framebuffer_t *console_fb = &console_fb_data;
 
 static bool have_vbe;
+static bool have_edid;
+
 static bool vbe_active;
 
 typedef struct {
@@ -126,6 +130,10 @@ typedef struct {
 
 static vbe_mode_t *avail_modes;
 static size_t num_modes;
+
+static void *edid;
+static size_t edid_size;
+//static unsigned char edid[VBE_EDID_SIZE];
 
 static bool iter_modes(vbe_info_t *controller, void (*cb)(vbe_mode_t *mode, void *ctx), void *ctx) {
     bool vbe3 = controller->version >= VBE_3_0;
@@ -235,6 +243,50 @@ void init_vbe() {
     have_vbe = true;
     int error = vfs_mknod(nullptr, "/dev/video/vbe", 14, S_IFCHR | 0600, DEVICE_ID(DRIVER_VIDEO, 0));
     if (unlikely(error)) panic("vbe: failed to create device file (%d)", error);
+
+    regs = (regs_t){.eax = 0x4f15};
+    intcall(0x10, &regs);
+
+    if (VBE_SUCCESS(regs.eax)) {
+        unsigned char buffer[128];
+        printk("vbe: edid supported\n");
+
+        regs = (regs_t){.eax = 0x4f15, .ebx = 1};
+        regs.edi = lin_to_seg((uintptr_t)buffer - KERN_VIRT_BASE, &regs.es);
+        intcall(0x10, &regs);
+        if (!VBE_SUCCESS(regs.eax)) {
+            printk("vbe: failed to get edid info: 0x%x\n", VBE_STATUS(regs.eax));
+            return;
+        }
+
+        // checksum
+        uint8_t sum = 0;
+        for (int i = 0; i < 128; i++) sum += buffer[i];
+
+        if (sum != 0) {
+            printk("vbe: invalid edid checksum\n");
+            return;
+        }
+
+        // read extensions
+        edid_size = (buffer[126] + 1) * 128;
+        edid = vmalloc(edid_size);
+        memcpy(edid, buffer, 128);
+
+        for (int i = 0; i < buffer[126]; i++) {
+            regs = (regs_t){.eax = 0x4f15, .ebx = 1, .edx = i + 1};
+            regs.edi = lin_to_seg((uintptr_t)buffer - KERN_VIRT_BASE, &regs.es);
+            intcall(0x10, &regs);
+            if (!VBE_SUCCESS(regs.eax)) {
+                printk("vbe: failed to get edid extension: 0x%x\n", VBE_STATUS(regs.eax));
+                return;
+            }
+
+            memcpy(edid + (i + 1) * 128, buffer, 128);
+        }
+
+        have_edid = true;
+    }
 }
 
 static void vbe_fb_free(file_t *) {
@@ -323,6 +375,24 @@ static int vbe_ioctl(file_t *, unsigned long request, void *arg) {
         file_deref(file);
         vbe_active = true;
         return fd;
+    }
+    case IOCTL_GET_EDID: {
+        if (!have_edid) return -ENODATA;
+        andromeda_edid_request_t request;
+
+        int error = -verify_pointer((uintptr_t)arg, sizeof(request));
+        if (unlikely(error)) return error;
+
+        error = -user_memcpy(&request, arg, sizeof(request));
+        if (unlikely(error)) return error;
+
+        error = -verify_pointer((uintptr_t)request.buffer, request.capacity);
+        if (unlikely(error)) return error;
+
+        error = -user_memcpy(request.buffer, edid, request.capacity < edid_size ? request.capacity : edid_size);
+        if (unlikely(error)) return error;
+
+        return edid_size;
     }
     default: return -ENOTTY;
     }
