@@ -215,6 +215,7 @@ bool libboot_acpi_get_rsdp_addr(paddr_t *out) {
     if (!file) return 1;
     bool status = fscanf(file, "%llx", &addr) != 0;
     fclose(file);
+    *out = addr;
     return status;
 }
 
