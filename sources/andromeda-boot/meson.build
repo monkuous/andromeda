@@ -5,5 +5,7 @@ project(
     meson_version: '>=1.4.0',
 )
 
-libboot = shared_library('boot', 'libboot.c', install: true)
-executable('boot-linux', 'linux.c', install: true, link_with: libboot)
+inc = include_directories('include')
+
+subdir('libboot')
+subdir('linux')
