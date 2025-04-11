@@ -15,3 +15,4 @@ packages:
       - less
       - nano
       - sed
+      - tar
