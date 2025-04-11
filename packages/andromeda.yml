@@ -11,5 +11,7 @@ packages:
       - andromeda-util
       - bash
       - coreutils
+      - grep
       - less
       - nano
+      - sed
