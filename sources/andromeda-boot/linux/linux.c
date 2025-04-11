@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
             char *end;
             user_width = strtol(optarg, &end, 10);
             if (*end) {
-                fprintf(stderr, "%s: -w: invalid argument\n", argv[0]);
+                fprintf(stderr, "%s: -W: invalid argument\n", argv[0]);
                 return 1;
             }
             break;
@@ -277,7 +277,7 @@ int main(int argc, char *argv[]) {
             char *end;
             user_height = strtol(optarg, &end, 10);
             if (*end) {
-                fprintf(stderr, "%s: -w: invalid argument\n", argv[0]);
+                fprintf(stderr, "%s: -H: invalid argument\n", argv[0]);
                 return 1;
             }
             break;
