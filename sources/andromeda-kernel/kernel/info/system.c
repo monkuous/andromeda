@@ -74,9 +74,16 @@ static void populate_video() {
     }
 }
 
+static void populate_firmware() {
+    file_t *file = open_file("firmware-type");
+    write_or_die(file, "bios", 4);
+    file_deref(file);
+}
+
 void populate_sysfs() {
     printk("kernel: populating /sys\n");
     populate_mmap();
     populate_acpi();
     populate_video();
+    populate_firmware();
 }
