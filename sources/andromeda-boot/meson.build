@@ -7,5 +7,8 @@ project(
 
 inc = include_directories('include')
 
+objcopy = find_program('objcopy')
+
 subdir('libboot')
+subdir('limine')
 subdir('linux')

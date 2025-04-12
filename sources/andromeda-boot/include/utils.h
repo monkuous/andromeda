@@ -31,14 +31,14 @@ static inline FILE *maybe_open(const char *path) {
     return file;
 }
 
-static inline const void *mmap_fd(int fd, const char *name, size_t *size_out) {
+static inline void *mmap_fd(int fd, const char *name, size_t *size_out) {
     struct stat stat;
     if (fstat(fd, &stat)) {
         fprintf(stderr, "%s: %s: stat failed: %m\n", progname, name);
         exit(1);
     }
 
-    void *ptr = mmap(nullptr, (stat.st_size + 0xfff) & ~0xfff, PROT_READ, MAP_PRIVATE, fd, 0);
+    void *ptr = mmap(nullptr, (stat.st_size + 0xfff) & ~0xfff, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
     if (ptr == MAP_FAILED) {
         fprintf(stderr, "%s: %s: mmap failed: %m\n", progname, name);
         exit(1);
@@ -48,7 +48,7 @@ static inline const void *mmap_fd(int fd, const char *name, size_t *size_out) {
     return ptr;
 }
 
-static inline const void *mmap_file(const char *path, size_t *size_out) {
+static inline void *mmap_file(const char *path, size_t *size_out) {
     if (!path) {
         if (size_out) *size_out = 0;
         return nullptr;
@@ -60,7 +60,7 @@ static inline const void *mmap_file(const char *path, size_t *size_out) {
         exit(1);
     }
 
-    const void *ptr = mmap_fd(fd, path, size_out);
+    void *ptr = mmap_fd(fd, path, size_out);
     close(fd);
     return ptr;
 }

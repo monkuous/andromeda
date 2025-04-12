@@ -117,6 +117,21 @@ static size_t insert_region(size_t i, paddr_t head, paddr_t tail, int type) {
     }
 }
 
+#define verify_mmap()                                                                                                  \
+    do {                                                                                                               \
+        for (size_t i = 0; i < mmap_count; i++) {                                                                      \
+            assert(memory_map[i].head <= memory_map[i].tail);                                                          \
+                                                                                                                       \
+            if (i < mmap_count - 1) {                                                                                  \
+                assert(memory_map[i].tail < memory_map[i + 1].head);                                                   \
+                                                                                                                       \
+                if (memory_map[i].type == memory_map[i + 1].type) {                                                    \
+                    assert(memory_map[i].tail + 1 < memory_map[i + 1].head);                                           \
+                }                                                                                                      \
+            }                                                                                                          \
+        }                                                                                                              \
+    } while (0)
+
 void libboot_mem_set_type(paddr_t head, paddr_t tail, int type) {
     size_t i = 0;
 
@@ -125,20 +140,26 @@ void libboot_mem_set_type(paddr_t head, paddr_t tail, int type) {
         paddr_t rhead = region->head;
         paddr_t rtail = region->tail;
 
-        if (rtail < head) continue;
+        if (rtail < head) {
+            i += 1;
+            continue;
+        }
+
         if (rhead > tail) break;
 
         // rhead <= tail && head <= rtail -> overlap
 
         if (head < rhead) {
             i = insert_region(i, head, rhead - 1, type);
+            verify_mmap();
             head = rhead;
             continue;
         }
 
         paddr_t otail = tail < rtail ? tail : rtail;
+        int rtype = region->type;
 
-        if (region->type != type) {
+        if (rtype != type) {
             if (rhead < head) {
                 region->tail = head - 1;
                 i += 1;
@@ -147,6 +168,12 @@ void libboot_mem_set_type(paddr_t head, paddr_t tail, int type) {
             }
 
             i = insert_region(i, head, otail, type);
+
+            if (otail < rtail) {
+                i = insert_region(i + 1, otail + 1, rtail, rtype);
+            }
+
+            verify_mmap();
         } else {
             i += 1;
         }
@@ -156,6 +183,7 @@ void libboot_mem_set_type(paddr_t head, paddr_t tail, int type) {
     }
 
     insert_region(i, head, tail, type);
+    verify_mmap();
 }
 
 const libboot_mem_region_t *libboot_mem_get_map(size_t *size_out) {

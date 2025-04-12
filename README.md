@@ -83,3 +83,4 @@ the `root` user checks if `/boot/andromed.sh` exists, and if so, runs it.
 
 Booting an operating system can be done with the applications installed by `andromeda-boot`:
 - `boot-linux` boots a Linux kernel image
+- `boot-limine` boots a Limine kernel
