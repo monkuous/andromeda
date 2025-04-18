@@ -172,13 +172,15 @@ static int check_read() {
 
         siginfo_t info = {.si_signo = SIGTTIN, .si_code = SI_KERNEL};
         group_signal(current->process->group, &info);
+        return EINTR;
     }
 
     return 0;
 }
 
 static int console_file_read(file_t *file, void *buf, size_t *count, uint64_t, bool) {
-    check_read();
+    int error = check_read();
+    if (unlikely(error)) return error;
 
     if (!input_available() && (console_poll_events(), !input_available())) {
         if (!(file->flags & O_NONBLOCK)) {
