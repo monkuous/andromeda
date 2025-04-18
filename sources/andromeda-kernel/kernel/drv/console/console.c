@@ -183,6 +183,11 @@ static int console_file_read(file_t *file, void *buf, size_t *count, uint64_t, b
     if (unlikely(error)) return error;
 
     if (!input_available() && (console_poll_events(), !input_available())) {
+        if (!(termios.c_lflag & ICANON) && !(termios.c_cc[VMIN] | termios.c_cc[VTIME])) {
+            *count = 0;
+            return 0;
+        }
+
         if (!(file->flags & O_NONBLOCK)) {
             struct console_read_op_ctx *op = vmalloc(sizeof(*op));
             op->buf = buf;
